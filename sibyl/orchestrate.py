@@ -64,8 +64,10 @@ class AgentTask:
 @dataclass
 class Action:
     """An action for the main Claude Code session to execute."""
-    action_type: str  # "agents_parallel", "agent_single", "bash", "done", "lark_sync", "paused"
-    agents: list[dict] | None = None  # for agent actions
+    action_type: str  # "skill", "skills_parallel", "agents_parallel", "agent_single", "team", "bash", "done", "lark_sync", "lark_upload", "paused"
+    agents: list[dict] | None = None  # for legacy agent actions
+    skills: list[dict] | None = None  # for fork skill actions: [{"name": "sibyl-xxx", "args": "..."}]
+    team: dict | None = None  # for Agent Teams: {"prompt": "...", "teammates": [{"role": "...", "prompt": "..."}], "require_plan_approval": bool}
     bash_command: str | None = None  # for bash actions
     description: str = ""
     stage: str = ""
@@ -81,9 +83,7 @@ class FarsOrchestrator:
     STAGES = [
         "init",
         "literature_search",
-        "idea_debate_generate",
-        "idea_debate_critique",
-        "idea_debate_synthesize",
+        "idea_debate",
         "planning",
         "pilot_experiments",
         "experiment_cycle",
@@ -178,7 +178,7 @@ class FarsOrchestrator:
 
         action = self._compute_action(stage, topic, status.iteration)
 
-        # Inject model tier info into agents
+        # Inject model tier info into legacy agents (cross-critique still uses this)
         if action.agents:
             for agent in action.agents:
                 tier, model = self._resolve_model_tier(agent["name"])
@@ -224,82 +224,68 @@ class FarsOrchestrator:
             common += f"\n\n---\n\n# 上一轮迭代经验教训\n\n{lessons}"
 
         if stage == "init":
+            # init is a transient stage; advance to literature_search
+            self.ws.update_stage("literature_search")
             return self._action_literature_search(topic, ws, common)
 
         elif stage == "literature_search":
-            return self._action_idea_debate_generate(topic, ws, common)
+            return self._action_literature_search(topic, ws, common)
 
-        elif stage == "idea_debate_generate":
-            return self._action_idea_debate_critique(ws, common)
-
-        elif stage == "idea_debate_critique":
-            return self._action_idea_debate_synthesize(topic, ws, common)
-
-        elif stage == "idea_debate_synthesize":
-            return self._action_planning(ws, common)
+        elif stage == "idea_debate":
+            return self._action_idea_debate(topic, ws, common)
 
         elif stage == "planning":
-            return self._action_pilot_experiments(ws, common)
+            return self._action_planning(ws, common)
 
         elif stage == "pilot_experiments":
-            return self._action_experiment_cycle(ws, common, iteration)
+            return self._action_pilot_experiments(ws, common)
 
         elif stage == "experiment_cycle":
-            return self._action_result_debate(ws, common)
+            return self._action_experiment_cycle(ws, common, iteration)
 
         elif stage == "result_debate":
-            return self._action_experiment_decision(ws, common)
+            return self._action_result_debate(ws, common)
 
         elif stage == "experiment_decision":
-            # Check if we should proceed to writing or cycle back
-            decision = self.ws.read_file("supervisor/experiment_analysis.md") or ""
-            if "DECISION: PIVOT" in decision.upper():
-                cycle = self._get_current_cycle()
-                if cycle < self.config.idea_exp_cycles:
-                    return self._action_idea_debate_generate(topic, ws, common)
-            return self._action_writing_outline(ws, common)
+            return self._action_experiment_decision(ws, common)
 
         elif stage == "writing_outline":
-            return self._action_writing_sections(ws, common)
+            return self._action_writing_outline(ws, common)
 
         elif stage == "writing_sections":
-            return self._action_writing_critique(ws, common)
+            return self._action_writing_sections(ws, common)
 
         elif stage == "writing_critique":
-            return self._action_writing_integrate(ws, common)
+            return self._action_writing_critique(ws, common)
 
         elif stage == "writing_integrate":
-            return self._action_writing_final_review(ws, common)
+            return self._action_writing_integrate(ws, common)
 
         elif stage == "writing_final_review":
-            review = self.ws.read_file("writing/review.md") or ""
-            match = re.search(r"SCORE:\s*(\d+(?:\.\d+)?)", review)
-            score = float(match.group(1)) if match else 5.0
-            if score < 7.0:
-                return self._action_writing_integrate(ws, common)
-            return self._action_writing_latex(ws, common)
+            return self._action_writing_final_review(ws, common)
 
         elif stage == "writing_latex":
-            return self._action_critic_review(ws, common)
+            return self._action_writing_latex(ws, common)
 
         elif stage == "critic_review":
-            return self._action_supervisor_review(ws, common)
+            return self._action_critic_review(ws, common)
 
         elif stage == "supervisor_review":
-            return self._action_reflection(ws)
+            return self._action_supervisor_review(ws, common)
 
         elif stage == "reflection":
-            if self.config.lark_enabled:
-                return self._action_lark_sync(ws)
-            return self._action_quality_gate()
+            return self._action_reflection(ws)
 
         elif stage == "lark_sync":
-            return self._action_lark_upload_pdf(ws)
+            return self._action_lark_sync(ws)
 
         elif stage == "lark_upload_pdf":
-            return self._action_quality_gate()
+            return self._action_lark_upload_pdf(ws)
 
         elif stage == "quality_gate":
+            return self._action_quality_gate()
+
+        elif stage == "done":
             return Action(action_type="done", description="Pipeline complete", stage="done")
 
         else:
@@ -310,29 +296,17 @@ class FarsOrchestrator:
     # ══════════════════════════════════════════════
 
     def _action_literature_search(self, topic: str, ws: str, common: str) -> Action:
-        """Single agent performs literature search via arXiv + WebSearch before idea debate."""
-        prompt_template = load_prompt("literature_researcher")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"研究主题: {topic}\n"
-            f"Workspace path: {ws}\n\n"
-            f"请同时使用 mcp__arxiv-mcp-server__search_papers 和 WebSearch 进行调研，"
-            f"将结果写入 {ws}/context/literature.md"
-        )
+        """Single fork skill performs literature search via arXiv + WebSearch."""
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "literature_researcher",
-                "prompt": prompt,
-                "description": "arXiv + Web 双源文献调研",
-            }],
+            action_type="skill",
+            skills=[{"name": "sibyl-literature", "args": f"{topic} {ws}"}],
             description="文献调研：arXiv 搜索 + Web 搜索，建立领域现状基础",
             stage="literature_search",
         )
 
-    def _action_idea_debate_generate(self, topic: str, ws: str, common: str) -> Action:
-        """3 parallel agents generate ideas independently."""
-        # Load spec and initial ideas if available
+    def _action_idea_debate(self, topic: str, ws: str, common: str) -> Action:
+        """Agent Team: 3 teammates generate, debate, and synthesize research ideas."""
+        # Prepare context file for teammates to read
         spec = self.ws.read_file("spec.md") or ""
         initial_ideas = self.ws.read_file("idea/initial_ideas.md") or ""
         seed_refs = self.ws.read_file("idea/references_seed.md") or ""
@@ -348,309 +322,168 @@ class FarsOrchestrator:
         if literature:
             extra_context += f"\n\n## 文献调研报告（请仔细阅读，避免重复已有工作）\n{literature}"
 
-        agents = []
-        for role in ["innovator", "pragmatist", "theoretical"]:
-            prompt_template = load_prompt(role)
-            prompt = (
-                f"{common}\n\n{prompt_template}\n\n"
-                f"Topic: {topic}\n\n"
-                f"Workspace path: {ws}\n\n"
-                f"Write your output to {ws}/idea/perspectives/{role}.md"
-                f"{extra_context}"
-            )
-            agents.append({
-                "name": role,
-                "prompt": prompt,
-                "description": f"{role} idea generation",
-            })
+        if extra_context:
+            self.ws.write_file("context/idea_context.md", extra_context)
 
-        return Action(
-            action_type="agents_parallel",
-            agents=agents,
-            description="3 parallel agents generating independent research ideas",
-            stage="idea_debate_generate",
-        )
-
-    def _action_idea_debate_critique(self, ws: str, common: str) -> Action:
-        """Cross-critique: each agent reviews others."""
-        agents = []
-        roles = ["innovator", "pragmatist", "theoretical"]
-
-        for critic in roles:
-            for author in roles:
-                if critic == author:
-                    continue
-                prompt = (
-                    f"{common}\n\n"
-                    f"You are a {critic} researcher critically evaluating another's idea.\n"
-                    f"Be constructive but thorough. Score 1-10.\n\n"
-                    f"Read the idea from: {ws}/idea/perspectives/{author}.md\n"
-                    f"Write your critique to: {ws}/idea/debate/{critic}_on_{author}.md\n\n"
-                    f"Evaluate:\n"
-                    f"1. Novelty: Is this truly new?\n"
-                    f"2. Feasibility: Can this be implemented with limited compute?\n"
-                    f"3. Impact: Would positive results be meaningful?\n"
-                    f"4. Risks: Main failure modes?\n"
-                    f"5. Suggestions: How to improve?"
-                )
-                agents.append({
-                    "name": f"{critic}_critiques_{author}",
-                    "prompt": prompt,
-                    "description": f"{critic} critiques {author}",
-                })
-
-        return Action(
-            action_type="agents_parallel",
-            agents=agents,
-            description="6 parallel cross-critique agents",
-            stage="idea_debate_critique",
-        )
-
-    def _action_idea_debate_synthesize(self, topic: str, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("synthesizer")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"Topic: {topic}\n"
-            f"Workspace path: {ws}"
+        team_prompt = (
+            f"Create an agent team to generate and debate research ideas for: {topic}\n\n"
+            f"Workspace: {ws}\n\n"
+            f"Spawn 3 teammates:\n"
+            f"1. Innovator: bold cross-disciplinary ideas. Read {ws}/context/idea_context.md for background. "
+            f"Write idea to {ws}/idea/perspectives/innovator.md\n"
+            f"2. Pragmatist: engineering-feasible ideas. Read same context. "
+            f"Write to {ws}/idea/perspectives/pragmatist.md\n"
+            f"3. Theoretical: mathematically grounded ideas. Read same context. "
+            f"Write to {ws}/idea/perspectives/theoretical.md\n\n"
+            f"After generating ideas, have teammates critique each other's work (score 1-10). "
+            f"Write critiques to {ws}/idea/debate/CRITIC_on_AUTHOR.md\n\n"
+            f"Finally, synthesize all ideas and critiques into a final proposal at "
+            f"{ws}/idea/final_proposal.md. Pick the strongest idea, incorporating feedback.\n\n"
+            f"All output in Chinese. Use Sonnet for teammates."
         )
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "synthesizer",
-                "prompt": prompt,
-                "description": "synthesize ideas into proposal",
-            }],
-            description="Synthesize ideas and critiques into final proposal",
-            stage="idea_debate_synthesize",
+            action_type="team",
+            team={"prompt": team_prompt},
+            description="Agent Team: 3人辩论生成研究提案（创新者+实用主义者+理论家）",
+            stage="idea_debate",
         )
 
     def _action_planning(self, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("planner")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"Workspace path: {ws}\n"
-            f"Pilot config: samples={self.config.pilot_samples}, "
+        pilot_config = (
+            f"samples={self.config.pilot_samples}, "
             f"seeds={self.config.pilot_seeds}, timeout={self.config.pilot_timeout}s"
         )
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "planner",
-                "prompt": prompt,
-                "description": "design experiment plan",
-            }],
+            action_type="skill",
+            skills=[{"name": "sibyl-planner", "args": f"{ws} {pilot_config}"}],
             description="Design experiment plan with pilot/full configs",
             stage="planning",
         )
 
     def _action_pilot_experiments(self, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("experimenter")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"MODE: PILOT\n"
-            f"Workspace path: {ws}\n"
-            f"SSH server: {self.config.ssh_server}\n"
-            f"Remote base: {self.config.remote_base}\n"
-            f"GPU IDs: {self.config.gpu_ids}\n"
-            f"Pilot samples: {self.config.pilot_samples}\n"
-            f"Pilot seeds: {self.config.pilot_seeds}\n"
-            f"Pilot timeout: {self.config.pilot_timeout}s\n\n"
-            f"Run PILOT experiments only. Report GO/NO-GO for each task."
-        )
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "experimenter_pilot",
-                "prompt": prompt,
-                "description": "run pilot experiments",
+            action_type="skill",
+            skills=[{
+                "name": "sibyl-experimenter",
+                "args": f"PILOT {ws} {self.config.ssh_server} {self.config.remote_base} {self.config.gpu_ids}",
             }],
             description="Run pilot experiments for quick validation",
             stage="pilot_experiments",
         )
 
     def _action_experiment_cycle(self, ws: str, common: str, iteration: int) -> Action:
-        prompt_template = load_prompt("experimenter")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"MODE: FULL\n"
-            f"Workspace path: {ws}\n"
-            f"SSH server: {self.config.ssh_server}\n"
-            f"Remote base: {self.config.remote_base}\n"
-            f"GPU IDs: {self.config.gpu_ids}\n"
-            f"Full seeds: {self.config.full_seeds}\n"
-            f"Iteration: {iteration}\n\n"
-            f"Run FULL experiments for tasks that passed pilot."
-        )
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "experimenter_full",
-                "prompt": prompt,
-                "description": "run full experiments",
+            action_type="skill",
+            skills=[{
+                "name": "sibyl-experimenter",
+                "args": f"FULL {ws} {self.config.ssh_server} {self.config.remote_base} {self.config.gpu_ids}",
             }],
             description="Run full experiments with statistical rigor",
             stage="experiment_cycle",
         )
 
     def _action_result_debate(self, ws: str, common: str) -> Action:
-        agents = []
-        for role in ["optimist", "skeptic", "strategist"]:
-            prompt_template = load_prompt(role)
-            prompt = (
-                f"{common}\n\n{prompt_template}\n\n"
-                f"Workspace path: {ws}"
-            )
-            agents.append({
-                "name": role,
-                "prompt": prompt,
-                "description": f"{role} result analysis",
-            })
+        team_prompt = (
+            f"Create an agent team to debate experiment results.\n\n"
+            f"Workspace: {ws}\n"
+            f"Read experiment results from {ws}/exp/results/\n\n"
+            f"Spawn 3 teammates:\n"
+            f"1. Optimist: highlight positive findings, potential impact\n"
+            f"2. Skeptic: challenge results, find flaws, demand more evidence\n"
+            f"3. Strategist: assess strategic implications, suggest next steps\n\n"
+            f"Have them debate each other's positions. The skeptic should challenge "
+            f"the optimist's claims, the strategist should mediate.\n\n"
+            f"Each teammate writes analysis to {ws}/exp/debate/ROLE.md\n"
+            f"All output in Chinese."
+        )
         return Action(
-            action_type="agents_parallel",
-            agents=agents,
-            description="3 parallel agents debate experiment results",
+            action_type="team",
+            team={"prompt": team_prompt},
+            description="Agent Team: 3人辩论实验结果（乐观者+怀疑论者+战略家）",
             stage="result_debate",
         )
 
     def _action_experiment_decision(self, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("supervisor")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"Workspace path: {ws}\n\n"
-            f"SPECIAL TASK: Analyze experiment results and the debate opinions.\n"
-            f"Read:\n"
-            f"- {ws}/exp/results/summary.md\n"
-            f"- {ws}/idea/result_debate/optimist.md\n"
-            f"- {ws}/idea/result_debate/skeptic.md\n"
-            f"- {ws}/idea/result_debate/strategist.md\n"
-            f"- {ws}/idea/proposal.md\n\n"
-            f"Determine: PIVOT or PROCEED?\n"
-            f"Write to {ws}/supervisor/experiment_analysis.md\n"
-            f"End with exactly: DECISION: PIVOT or DECISION: PROCEED"
-        )
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "supervisor_decision",
-                "prompt": prompt,
-                "description": "decide pivot or proceed",
-            }],
+            action_type="skill",
+            skills=[{"name": "sibyl-supervisor-decision", "args": ws}],
             description="Supervisor analyzes results and decides PIVOT or PROCEED",
             stage="experiment_decision",
         )
 
     def _action_writing_outline(self, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("outline_writer")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"Workspace path: {ws}"
-        )
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "outline_writer",
-                "prompt": prompt,
-                "description": "generate paper outline",
-            }],
+            action_type="skill",
+            skills=[{"name": "sibyl-outline-writer", "args": ws}],
             description="Generate paper outline",
             stage="writing_outline",
         )
 
     def _action_writing_sections(self, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("section_writer")
-        agents = []
-        for section_id, section_name in PAPER_SECTIONS:
-            prompt = (
-                f"{common}\n\n{prompt_template}\n\n"
-                f"Section: {section_name}\n"
-                f"Section ID: {section_id}\n"
-                f"Workspace path: {ws}\n"
-                f"Write to: {ws}/writing/sections/{section_id}.md"
-            )
-            agents.append({
-                "name": f"writer_{section_id}",
-                "prompt": prompt,
-                "description": f"write {section_name} section",
-            })
+        sections_info = "\n".join(
+            f"- {name} (section id: {sid}): write to {ws}/writing/sections/{sid}.md"
+            for sid, name in PAPER_SECTIONS
+        )
+        team_prompt = (
+            f"Create an agent team to write paper sections in parallel.\n\n"
+            f"Workspace: {ws}\n"
+            f"Read outline from {ws}/writing/outline.md\n"
+            f"Read experiment results from {ws}/exp/results/\n\n"
+            f"Spawn 6 teammates, one for each section:\n{sections_info}\n\n"
+            f"Teammates should coordinate for consistency — share key definitions, "
+            f"notation, and cross-references between sections.\n"
+            f"All writing in Chinese."
+        )
         return Action(
-            action_type="agents_parallel",
-            agents=agents,
-            description="6 parallel agents writing paper sections",
+            action_type="team",
+            team={"prompt": team_prompt},
+            description="Agent Team: 6人并行撰写论文各章节",
             stage="writing_sections",
         )
 
     def _action_writing_critique(self, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("section_critic")
-        agents = []
-        for section_id, section_name in PAPER_SECTIONS:
-            prompt = (
-                f"{common}\n\n{prompt_template}\n\n"
-                f"Section: {section_name}\n"
-                f"Section ID: {section_id}\n"
-                f"Workspace path: {ws}\n"
-                f"Read: {ws}/writing/sections/{section_id}.md\n"
-                f"Write critique to: {ws}/writing/critique/{section_id}_critique.md"
-            )
-            agents.append({
-                "name": f"critic_{section_id}",
-                "prompt": prompt,
-                "description": f"critique {section_name} section",
-            })
+        sections_info = "\n".join(
+            f"- Critic for {name}: read {ws}/writing/sections/{sid}.md, "
+            f"write critique to {ws}/critic/{sid}_critique.md"
+            for sid, name in PAPER_SECTIONS
+        )
+        team_prompt = (
+            f"Create an agent team to critique paper sections.\n\n"
+            f"Workspace: {ws}\n\n"
+            f"Spawn 6 teammates, one critic per section:\n{sections_info}\n\n"
+            f"Critics should cross-reference other sections for consistency issues. "
+            f"Score each section 1-10 and provide specific improvement suggestions.\n"
+            f"All output in Chinese."
+        )
         return Action(
-            action_type="agents_parallel",
-            agents=agents,
-            description="6 parallel agents critiquing paper sections",
+            action_type="team",
+            team={"prompt": team_prompt},
+            description="Agent Team: 6人并行批评论文各章节",
             stage="writing_critique",
         )
 
     def _action_writing_integrate(self, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("editor")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"Workspace path: {ws}"
-        )
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "editor",
-                "prompt": prompt,
-                "description": "integrate paper sections",
-            }],
+            action_type="skill",
+            skills=[{"name": "sibyl-editor", "args": ws}],
             description="Integrate all sections into coherent paper",
             stage="writing_integrate",
         )
 
     def _action_writing_final_review(self, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("final_critic")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"Workspace path: {ws}"
-        )
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "final_critic",
-                "prompt": prompt,
-                "description": "final paper review",
-            }],
+            action_type="skill",
+            skills=[{"name": "sibyl-final-critic", "args": ws}],
             description="Top-tier conference-level paper review",
             stage="writing_final_review",
         )
 
     def _action_writing_latex(self, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("latex_writer")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"Workspace path: {ws}\n"
-            f"SSH server: {self.config.ssh_server}\n"
-            f"Remote base: {self.config.remote_base}"
-        )
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "latex_writer",
-                "prompt": prompt,
-                "description": "generate NeurIPS LaTeX and compile PDF",
+            action_type="skill",
+            skills=[{
+                "name": "sibyl-latex-writer",
+                "args": f"{ws} {self.config.ssh_server} {self.config.remote_base}",
             }],
             description="将论文转为 NeurIPS LaTeX 格式并编译 PDF",
             stage="writing_latex",
@@ -685,73 +518,26 @@ class FarsOrchestrator:
         )
 
     def _action_critic_review(self, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("critic")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"Workspace path: {ws}"
-        )
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "critic",
-                "prompt": prompt,
-                "description": "comprehensive critic review",
-            }],
+            action_type="skill",
+            skills=[{"name": "sibyl-critic", "args": ws}],
             description="Harsh but fair academic critique of all outputs",
             stage="critic_review",
         )
 
     def _action_supervisor_review(self, ws: str, common: str) -> Action:
-        prompt_template = load_prompt("supervisor")
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"Workspace path: {ws}"
-        )
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "supervisor",
-                "prompt": prompt,
-                "description": "supervisor quality review",
-            }],
+            action_type="skill",
+            skills=[{"name": "sibyl-supervisor", "args": ws}],
             description="Independent supervisor review with quality scoring",
             stage="supervisor_review",
         )
 
     def _action_reflection(self, ws: str) -> Action:
-        common = load_common_prompt()
-        prompt_template = load_prompt("reflection")
-
-        # Build prioritized context using ContextBuilder
-        ctx = ContextBuilder(budget=6000)
-        ctx.add("Supervisor Review",
-                self.ws.read_file("supervisor/review_writing.md") or "", priority=10)
-        ctx.add("Critic Feedback",
-                self.ws.read_file("critic/critique_writing.md") or "", priority=8)
-        ctx.add("Experiment Summary",
-                self.ws.read_file("exp/results/summary.md") or "", priority=7)
-        ctx.add("Previous Lessons",
-                self.ws.read_file("reflection/lessons_learned.md") or "", priority=6)
-        ctx.add("Research Diary",
-                self.ws.read_file("logs/research_diary.md") or "", priority=4)
-
         iteration = self.ws.get_status().iteration
-        context_str = ctx.build()
-
-        prompt = (
-            f"{common}\n\n{prompt_template}\n\n"
-            f"Workspace path: {ws}\n"
-            f"Current iteration: {iteration}\n\n"
-            f"## Context\n{context_str}"
-        )
-
         return Action(
-            action_type="agent_single",
-            agents=[{
-                "name": "reflection",
-                "prompt": prompt,
-                "description": "analyze iteration and generate lessons",
-            }],
+            action_type="skill",
+            skills=[{"name": "sibyl-reflection", "args": f"{ws} {iteration}"}],
             description="Reflection agent: classify issues, generate improvement plan and lessons",
             stage="reflection",
         )
@@ -808,7 +594,7 @@ class FarsOrchestrator:
 
         # Adaptive thresholds from reflection agent's action plan
         threshold = 8.0
-        max_iters = 3
+        max_iters = 10
         action_plan_raw = self.ws.read_file("reflection/action_plan.json")
         if action_plan_raw:
             try:
@@ -953,6 +739,26 @@ class FarsOrchestrator:
     def _get_next_stage(self, current_stage: str, result: str = "",
                         score: float | None = None) -> str:
         """Determine the next stage based on current stage and result."""
+        # experiment_decision: PIVOT loops back to idea_debate
+        if current_stage == "experiment_decision":
+            decision = self.ws.read_file("supervisor/experiment_analysis.md") or ""
+            if "DECISION: PIVOT" in decision.upper():
+                cycle = self._get_current_cycle()
+                if cycle < self.config.idea_exp_cycles:
+                    return "idea_debate"
+
+        # writing_final_review: low score loops back to writing_integrate
+        if current_stage == "writing_final_review":
+            review = self.ws.read_file("writing/review.md") or ""
+            match = re.search(r"SCORE:\s*(\d+(?:\.\d+)?)", review)
+            review_score = float(match.group(1)) if match else 5.0
+            if review_score < 7.0:
+                return "writing_integrate"
+
+        # lark stages: skip if lark disabled
+        if current_stage == "reflection" and not self.config.lark_enabled:
+            return "quality_gate"
+
         try:
             idx = self.STAGES.index(current_stage)
             if idx + 1 < len(self.STAGES):
@@ -1048,35 +854,35 @@ def cli_init_spec(project_name: str, config_path: str | None = None):
     ws = Workspace(config.workspaces_dir, project_name)
 
     # Create spec template
-    spec_template = f"""# Project: {project_name}
+    spec_template = f"""# 项目: {project_name}
 
-## Topic
+## 研究主题
 <!-- 一句话描述研究主题 -->
 
-## Background & Motivation
+## 背景与动机
 <!-- 为什么要研究这个？有什么已知的相关工作？ -->
 
-## Initial Ideas
+## 初始想法
 <!-- 你已有的想法或方向（可选） -->
 
-## Key References
+## 关键参考文献
 <!-- 论文 URL、arXiv ID 等 -->
 -
 
-## Resources
+## 可用资源
 - GPU: 4x on cs8000d
-- Server: {config.ssh_server}
-- Remote Base: {config.remote_base}
+- 服务器: {config.ssh_server}
+- 远程路径: {config.remote_base}
 
-## Constraints
-- Experiment type: training-free / lightweight
-- Model size: small (GPT-2, BERT-base, Qwen-0.5B)
-- Time budget:
+## 实验约束
+- 实验类型: training-free / 轻量训练 / 不限
+- 模型规模: 小 (GPT-2, BERT-base, Qwen-0.5B)
+- 时间预算:
 
-## Target Output
-- paper / tech report / experiment validation
+## 目标产出
+- 论文 / 技术报告 / 实验验证
 
-## Special Notes
+## 特殊需求
 <!-- 任何特殊需求 -->
 """
     ws.write_file("spec.md", spec_template)
@@ -1102,7 +908,7 @@ def cli_init_from_spec(spec_path: str, config_path: str | None = None):
         project_name = spec_file.parent.name
     else:
         # Extract from spec header
-        match = re.search(r'^#\s*Project:\s*(.+)', spec_content, re.MULTILINE)
+        match = re.search(r'^#\s*(?:Project|项目):\s*(.+)', spec_content, re.MULTILINE)
         project_name = match.group(1).strip() if match else spec_file.stem
 
     project_name = FarsOrchestrator._slugify(project_name)
@@ -1111,7 +917,7 @@ def cli_init_from_spec(spec_path: str, config_path: str | None = None):
     ws = Workspace(config.workspaces_dir, project_name)
 
     # Extract topic from spec
-    topic_match = re.search(r'##\s*Topic\s*\n+(.+?)(?:\n\n|\n##)', spec_content, re.DOTALL)
+    topic_match = re.search(r'##\s*(?:Topic|研究主题)\s*\n+(.+?)(?:\n\n|\n##)', spec_content, re.DOTALL)
     topic = topic_match.group(1).strip() if topic_match else project_name
     # Remove HTML comments
     topic = re.sub(r'<!--.*?-->', '', topic).strip()
@@ -1122,12 +928,12 @@ def cli_init_from_spec(spec_path: str, config_path: str | None = None):
     ws.update_stage("init")
 
     # Extract references if present
-    refs_match = re.search(r'##\s*Key References\s*\n(.+?)(?:\n##|\Z)', spec_content, re.DOTALL)
+    refs_match = re.search(r'##\s*(?:Key References|关键参考文献)\s*\n(.+?)(?:\n##|\Z)', spec_content, re.DOTALL)
     if refs_match:
         ws.write_file("idea/references_seed.md", refs_match.group(1).strip())
 
     # Extract initial ideas if present
-    ideas_match = re.search(r'##\s*Initial Ideas\s*\n(.+?)(?:\n##|\Z)', spec_content, re.DOTALL)
+    ideas_match = re.search(r'##\s*(?:Initial Ideas|初始想法)\s*\n(.+?)(?:\n##|\Z)', spec_content, re.DOTALL)
     if ideas_match:
         ideas_text = ideas_match.group(1).strip()
         ideas_text = re.sub(r'<!--.*?-->', '', ideas_text).strip()
