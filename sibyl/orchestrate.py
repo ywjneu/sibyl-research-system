@@ -1,10 +1,10 @@
-"""FARS orchestrator for Claude Code native mode.
+"""Sibyl orchestrator for Claude Code native mode.
 
 This module provides a state-machine orchestrator that returns the next action
 for the main Claude Code session to execute. It does NOT call claude-agent-sdk.
 
 Usage (called by Skill via Bash):
-    python -c "from fars.orchestrate import FarsOrchestrator; ..."
+    python -c "from sibyl.orchestrate import FarsOrchestrator; ..."
 """
 import json
 import re
@@ -12,10 +12,10 @@ import time
 from pathlib import Path
 from dataclasses import dataclass, asdict
 
-from fars.config import Config
-from fars.workspace import Workspace
-from fars.context_builder import ContextBuilder
-from fars.experiment_records import ExperimentDB
+from sibyl.config import Config
+from sibyl.workspace import Workspace
+from sibyl.context_builder import ContextBuilder
+from sibyl.experiment_records import ExperimentDB
 
 PAPER_SECTIONS = [
     ("intro", "Introduction"),
@@ -30,11 +30,21 @@ PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 
 def load_prompt(agent_name: str) -> str:
-    """Load an agent prompt from the prompts/ directory."""
+    """Load an agent prompt from the prompts/ directory, with overlay injection."""
     path = PROMPTS_DIR / f"{agent_name}.md"
-    if path.exists():
-        return path.read_text(encoding="utf-8")
-    return ""
+    if not path.exists():
+        return ""
+    base = path.read_text(encoding="utf-8")
+
+    # Global overlay (cross-project experience)
+    overlay_path = (
+        Path.home() / ".claude" / "sibyl_evolution" / "lessons" / f"{agent_name}.md"
+    )
+    if overlay_path.exists():
+        overlay = overlay_path.read_text(encoding="utf-8")
+        base += f"\n\n---\n\n{overlay}"
+
+    return base
 
 
 def load_common_prompt() -> str:
@@ -54,7 +64,7 @@ class AgentTask:
 @dataclass
 class Action:
     """An action for the main Claude Code session to execute."""
-    action_type: str  # "agents_parallel", "agent_single", "bash", "done", "lark_sync"
+    action_type: str  # "agents_parallel", "agent_single", "bash", "done", "lark_sync", "paused"
     agents: list[dict] | None = None  # for agent actions
     bash_command: str | None = None  # for bash actions
     description: str = ""
@@ -62,14 +72,15 @@ class Action:
 
 
 class FarsOrchestrator:
-    """State-machine orchestrator for FARS research pipeline.
+    """State-machine orchestrator for Sibyl research pipeline.
 
-    Called by the FARS Skill, returns the next action for Claude Code to execute.
+    Called by the Sibyl Skill, returns the next action for Claude Code to execute.
     """
 
     # Pipeline stages in order
     STAGES = [
         "init",
+        "literature_search",
         "idea_debate_generate",
         "idea_debate_critique",
         "idea_debate_synthesize",
@@ -116,6 +127,7 @@ class FarsOrchestrator:
         status = ws.get_status()
         ws.write_file("topic.txt", topic)
         ws.update_stage("init")
+        ws.git_init()
 
         return {
             "project_name": project_name,
@@ -134,18 +146,54 @@ class FarsOrchestrator:
             },
         }
 
+    def _resolve_model_tier(self, agent_name: str) -> tuple[str, str]:
+        """Return (tier, model_id) for a given agent name."""
+        tier_key = agent_name
+        if agent_name.startswith("writer_"):
+            tier_key = "section_writer"
+        elif agent_name.startswith("critic_") and agent_name != "critic":
+            tier_key = "section_critic"
+        elif "_critiques_" in agent_name:
+            tier_key = "idea_critique"
+
+        tier = self.config.agent_tier_map.get(tier_key, "standard")
+        model = self.config.model_tiers.get(tier, self.config.model_tiers["standard"])
+        return tier, model
+
     def get_next_action(self) -> dict:
         """Determine and return the next action based on current state."""
         status = self.ws.get_status()
+
+        # Check pause state
+        if status.paused_at > 0:
+            return asdict(Action(
+                action_type="paused",
+                description=f"项目已暂停（{time.strftime('%H:%M', time.localtime(status.paused_at))}）。"
+                            f"等待额度恢复后自动继续。",
+                stage=status.stage,
+            ))
+
         stage = status.stage
         topic = self.ws.read_file("topic.txt") or ""
 
         action = self._compute_action(stage, topic, status.iteration)
+
+        # Inject model tier info into agents
+        if action.agents:
+            for agent in action.agents:
+                tier, model = self._resolve_model_tier(agent["name"])
+                agent["model_tier"] = tier
+                agent["model"] = model
+
         return asdict(action)
 
     def record_result(self, stage: str, result: str = "",
                       score: float | None = None):
         """Record the result of a completed stage and advance state."""
+        # Post-reflection hook: process reflection agent outputs
+        if stage == "reflection":
+            self._post_reflection_hook()
+
         next_stage = self._get_next_stage(stage, result, score)
         self.ws.update_stage(next_stage)
 
@@ -154,6 +202,10 @@ class FarsOrchestrator:
                 f"logs/stage_{stage}_score.txt",
                 f"{score}"
             )
+
+        # Auto git commit after each stage
+        score_str = f" (score={score})" if score is not None else ""
+        self.ws.git_commit(f"sibyl: complete {stage}{score_str}")
 
     def get_status(self) -> dict:
         """Get current project status."""
@@ -166,7 +218,15 @@ class FarsOrchestrator:
         ws = self.workspace_path
         common = load_common_prompt()
 
+        # Inject project-level lessons from previous iterations
+        lessons = self.ws.read_file("reflection/lessons_learned.md")
+        if lessons:
+            common += f"\n\n---\n\n# 上一轮迭代经验教训\n\n{lessons}"
+
         if stage == "init":
+            return self._action_literature_search(topic, ws, common)
+
+        elif stage == "literature_search":
             return self._action_idea_debate_generate(topic, ws, common)
 
         elif stage == "idea_debate_generate":
@@ -249,12 +309,34 @@ class FarsOrchestrator:
     # Action builders
     # ══════════════════════════════════════════════
 
+    def _action_literature_search(self, topic: str, ws: str, common: str) -> Action:
+        """Single agent performs literature search via arXiv + WebSearch before idea debate."""
+        prompt_template = load_prompt("literature_researcher")
+        prompt = (
+            f"{common}\n\n{prompt_template}\n\n"
+            f"研究主题: {topic}\n"
+            f"Workspace path: {ws}\n\n"
+            f"请同时使用 mcp__arxiv-mcp-server__search_papers 和 WebSearch 进行调研，"
+            f"将结果写入 {ws}/context/literature.md"
+        )
+        return Action(
+            action_type="agent_single",
+            agents=[{
+                "name": "literature_researcher",
+                "prompt": prompt,
+                "description": "arXiv + Web 双源文献调研",
+            }],
+            description="文献调研：arXiv 搜索 + Web 搜索，建立领域现状基础",
+            stage="literature_search",
+        )
+
     def _action_idea_debate_generate(self, topic: str, ws: str, common: str) -> Action:
         """3 parallel agents generate ideas independently."""
         # Load spec and initial ideas if available
         spec = self.ws.read_file("spec.md") or ""
         initial_ideas = self.ws.read_file("idea/initial_ideas.md") or ""
         seed_refs = self.ws.read_file("idea/references_seed.md") or ""
+        literature = self.ws.read_file("context/literature.md") or ""
 
         extra_context = ""
         if spec:
@@ -263,6 +345,8 @@ class FarsOrchestrator:
             extra_context += f"\n\n## User's Initial Ideas\n{initial_ideas}"
         if seed_refs:
             extra_context += f"\n\n## Seed References (from user)\n{seed_refs}"
+        if literature:
+            extra_context += f"\n\n## 文献调研报告（请仔细阅读，避免重复已有工作）\n{literature}"
 
         agents = []
         for role in ["innovator", "pragmatist", "theoretical"]:
@@ -579,7 +663,7 @@ class FarsOrchestrator:
             description=(
                 f"上传 PDF 和研究文档到飞书云空间。\n"
                 f"飞书文件夹结构:\n"
-                f"  FARS 研究项目/\n"
+                f"  西比拉研究项目/\n"
                 f"    └── {self.ws.name}/\n"
                 f"        ├── 论文/\n"
                 f"        │   └── v{iteration}_main.pdf\n"
@@ -595,7 +679,7 @@ class FarsOrchestrator:
                 f"2. 使用 mcp__lark__docx_builtin_import 上传研究日记\n"
                 f"3. 使用 mcp__lark__bitable_v1_appTableRecord_create 更新实验数据表\n"
                 f"4. 使用 mcp__lark__im_v1_message_create 通知团队:\n"
-                f"   「FARS [{self.ws.name}] 迭代 {iteration} 完成，PDF 已更新」"
+                f"   「西比拉 [{self.ws.name}] 迭代 {iteration} 完成，PDF 已更新」"
             ),
             stage="lark_upload_pdf",
         )
@@ -635,22 +719,83 @@ class FarsOrchestrator:
         )
 
     def _action_reflection(self, ws: str) -> Action:
+        common = load_common_prompt()
+        prompt_template = load_prompt("reflection")
+
+        # Build prioritized context using ContextBuilder
+        ctx = ContextBuilder(budget=6000)
+        ctx.add("Supervisor Review",
+                self.ws.read_file("supervisor/review_writing.md") or "", priority=10)
+        ctx.add("Critic Feedback",
+                self.ws.read_file("critic/critique_writing.md") or "", priority=8)
+        ctx.add("Experiment Summary",
+                self.ws.read_file("exp/results/summary.md") or "", priority=7)
+        ctx.add("Previous Lessons",
+                self.ws.read_file("reflection/lessons_learned.md") or "", priority=6)
+        ctx.add("Research Diary",
+                self.ws.read_file("logs/research_diary.md") or "", priority=4)
+
+        iteration = self.ws.get_status().iteration
+        context_str = ctx.build()
+
+        prompt = (
+            f"{common}\n\n{prompt_template}\n\n"
+            f"Workspace path: {ws}\n"
+            f"Current iteration: {iteration}\n\n"
+            f"## Context\n{context_str}"
+        )
+
         return Action(
-            action_type="bash",
-            bash_command=(
-                f'python3 -c "'
-                f"from fars.orchestrate import FarsOrchestrator; "
-                f"o = FarsOrchestrator('{ws}'); "
-                f'o.run_reflection()"'
-            ),
-            description="Run reflection and log iteration results",
+            action_type="agent_single",
+            agents=[{
+                "name": "reflection",
+                "prompt": prompt,
+                "description": "analyze iteration and generate lessons",
+            }],
+            description="Reflection agent: classify issues, generate improvement plan and lessons",
             stage="reflection",
         )
 
     def _action_lark_sync(self, ws: str) -> Action:
+        iteration = self.ws.get_status().iteration
         return Action(
             action_type="lark_sync",
-            description="Sync research diary and experiment data to Lark",
+            description=f"""同步所有研究数据到飞书云空间。
+
+飞书文件夹: 西比拉研究项目/{self.ws.name}/
+
+## 1. 研究日记
+- 读取: {ws}/logs/research_diary.md
+- 导入为飞书文档: 研究过程/研究日记.md
+- 使用 mcp__lark__docx_builtin_import
+
+## 2. 迭代日志表格
+- 读取: {ws}/logs/iterations/master_log.jsonl
+- 创建/更新飞书多维表格: 迭代日志/
+- 字段: iteration, stage, timestamp, quality_score, issues_found 数量, notes
+- 使用 mcp__lark__bitable_v1_appTableRecord_create
+
+## 3. Reflection 报告
+- 读取: {ws}/reflection/reflection.md
+- 导入为飞书文档: 研究过程/反思报告_v{iteration}.md
+- 使用 mcp__lark__docx_builtin_import
+
+## 4. 实验数据表
+- 读取: {ws}/exp/experiment_db.jsonl
+- 创建/更新飞书多维表格: 实验数据/
+- 字段: experiment_id, method, metrics (JSON), status, is_pilot, seed
+- 使用 mcp__lark__bitable_v1_appTableRecord_create
+
+## 5. 系统进化记录
+- 读取: ~/.claude/sibyl_evolution/outcomes.jsonl
+- 读取: ~/.claude/sibyl_evolution/global_lessons.md (如有)
+- 导入为飞书文档: 系统进化/全局经验.md
+- 使用 mcp__lark__docx_builtin_import
+
+## 6. 团队通知
+- 使用 mcp__lark__im_v1_message_create
+- 格式: 「西比拉 [{self.ws.name}] 迭代 {iteration} 数据已同步 | 分数: X/10」
+""",
             stage="lark_sync",
         )
 
@@ -661,79 +806,134 @@ class FarsOrchestrator:
         score = float(match.group(1)) if match else 5.0
         iteration = self.ws.get_status().iteration
 
-        if score >= 8.0 and iteration >= 2:
-            return Action(
-                action_type="done",
-                description=f"Quality threshold reached (score={score}). Pipeline complete.",
-                stage="done",
+        # Adaptive thresholds from reflection agent's action plan
+        threshold = 8.0
+        max_iters = 3
+        action_plan_raw = self.ws.read_file("reflection/action_plan.json")
+        if action_plan_raw:
+            try:
+                action_plan = json.loads(action_plan_raw)
+                threshold = action_plan.get("suggested_threshold_adjustment") or threshold
+                max_iters = action_plan.get("suggested_max_iterations") or max_iters
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        is_done = (score >= threshold and iteration >= 2) or iteration >= max_iters
+
+        if is_done:
+            # Tag final iteration
+            self.ws.git_tag(
+                f"v{iteration}",
+                f"Iteration {iteration} complete, score={score}",
             )
-        elif iteration >= 3:
+
+            # Trigger cross-project evolution on completion
+            if self.config.evolution_enabled:
+                from sibyl.evolution import EvolutionEngine
+                EvolutionEngine().run_cross_project_evolution()
+
             return Action(
                 action_type="done",
-                description=f"Max iterations reached (score={score}). Pipeline complete.",
+                description=(
+                    f"Pipeline complete (score={score}, threshold={threshold}, "
+                    f"iter={iteration}/{max_iters})."
+                ),
                 stage="done",
             )
         else:
+            # Tag end of iteration before starting next
+            self.ws.git_tag(
+                f"iter-{iteration}",
+                f"End of iteration {iteration}, score={score}",
+            )
             self.ws.update_iteration(iteration + 1)
             return Action(
                 action_type="bash",
                 bash_command=f"echo 'Starting iteration {iteration + 1}'",
-                description=f"Quality gate: score={score}, starting iteration {iteration + 1}",
+                description=(
+                    f"Quality gate: score={score} < {threshold}, "
+                    f"starting iteration {iteration + 1}"
+                ),
                 stage="init",
             )
 
     # ══════════════════════════════════════════════
-    # Reflection (pure Python, no SDK)
+    # Post-reflection hook (processes reflection agent outputs)
     # ══════════════════════════════════════════════
 
-    def run_reflection(self):
-        """Run reflection and log iteration results. Called via Bash."""
-        from fars.reflection import IterationLogger
-        from fars.evolution import EvolutionEngine
+    def _post_reflection_hook(self):
+        """Process reflection agent outputs: log iteration, record evolution, generate overlay."""
+        from sibyl.reflection import IterationLogger
+        from sibyl.evolution import EvolutionEngine
 
         iteration = self.ws.get_status().iteration
         logger = IterationLogger(self.ws.root)
 
-        supervisor_review = self.ws.read_file("supervisor/review_writing.md") or ""
-        critic_feedback = self.ws.read_file("critic/critique_writing.md") or ""
-        issues_raw = self.ws.read_file("supervisor/issues.json")
-
-        issues_found = []
-        if issues_raw:
+        # Read reflection agent's structured output
+        action_plan_raw = self.ws.read_file("reflection/action_plan.json")
+        action_plan = {}
+        classified_issues = []
+        if action_plan_raw:
             try:
-                issues_data = json.loads(issues_raw)
-                issues_found = [i.get("description", "") for i in issues_data]
+                action_plan = json.loads(action_plan_raw)
+                classified_issues = action_plan.get("issues_classified", [])
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        # Fallback: read supervisor issues if reflection agent didn't produce classified issues
+        if not classified_issues:
+            issues_raw = self.ws.read_file("supervisor/issues.json")
+            if issues_raw:
+                try:
+                    issues_data = json.loads(issues_raw)
+                    from sibyl.evolution import IssueCategory
+                    classified_issues = [
+                        {
+                            "description": i.get("description", ""),
+                            "category": IssueCategory.classify(i.get("description", "")).value,
+                            "severity": i.get("severity", "medium"),
+                        }
+                        for i in issues_data
+                    ]
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        issues_found = [ci.get("description", "") for ci in classified_issues]
+
+        # Extract score
+        supervisor_review = self.ws.read_file("supervisor/review_writing.md") or ""
         score = 5.0
         score_match = re.search(r'(?:score|rating|quality)[:\s]*(\d+(?:\.\d+)?)',
                                 supervisor_review, re.IGNORECASE)
         if score_match:
             score = float(score_match.group(1))
 
+        # Log iteration with classified issues
         logger.log_iteration(
             iteration=iteration,
-            stage="supervisor",
+            stage="reflection",
             changes=[f"Iteration {iteration} complete"],
             issues_found=issues_found[:10],
             issues_fixed=[],
             quality_score=score,
-            notes=f"Critic summary: {critic_feedback[:200]}",
+            notes=json.dumps({"classified_issues": classified_issues[:10]}, ensure_ascii=False),
         )
 
         # Research diary
+        critic_feedback = self.ws.read_file("critic/critique_writing.md") or ""
+        reflection_md = self.ws.read_file("reflection/reflection.md") or ""
         diary_entry = (
             f"# Iteration {iteration}\n\n"
             f"**Score**: {score}/10\n"
             f"**Issues**: {len(issues_found)}\n\n"
-            f"## Review Summary\n{supervisor_review[:1000]}\n\n"
+            f"## Reflection\n{reflection_md[:1000]}\n\n"
+            f"## Review Summary\n{supervisor_review[:500]}\n\n"
             f"## Critique Summary\n{critic_feedback[:500]}\n"
         )
         existing_diary = self.ws.read_file("logs/research_diary.md") or ""
         self.ws.write_file("logs/research_diary.md", existing_diary + "\n\n" + diary_entry)
 
-        # Evolution recording
+        # Evolution recording with classification
         if self.config.evolution_enabled:
             engine = EvolutionEngine()
             engine.record_outcome(
@@ -743,8 +943,8 @@ class FarsOrchestrator:
                 score=score,
                 notes=f"Iteration {iteration}",
             )
-
-        print(json.dumps({"status": "ok", "score": score, "issues": len(issues_found)}))
+            # Generate per-agent lessons overlay
+            engine.generate_lessons_overlay()
 
     # ══════════════════════════════════════════════
     # Utilities
@@ -801,6 +1001,20 @@ def cli_record(workspace_path: str, stage: str, result: str = "",
     o = FarsOrchestrator(workspace_path)
     o.record_result(stage, result, score)
     print(json.dumps({"status": "ok", "new_stage": o.ws.get_status().stage}))
+
+
+def cli_pause(workspace_path: str, reason: str = "rate_limit"):
+    """CLI: Pause a project."""
+    o = FarsOrchestrator(workspace_path)
+    o.ws.pause(reason)
+    print(json.dumps({"status": "paused", "stage": o.ws.get_status().stage}))
+
+
+def cli_resume(workspace_path: str):
+    """CLI: Resume a paused project."""
+    o = FarsOrchestrator(workspace_path)
+    o.ws.resume()
+    print(json.dumps({"status": "resumed", "stage": o.ws.get_status().stage}))
 
 
 def cli_status(workspace_path: str):

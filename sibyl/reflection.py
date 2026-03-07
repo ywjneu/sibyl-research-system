@@ -1,4 +1,4 @@
-"""Reflection and iteration logging for the FARS pipeline.
+"""Reflection and iteration logging for the Sibyl pipeline.
 
 Handles:
 - Post-stage reflection

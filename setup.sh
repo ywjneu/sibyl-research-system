@@ -1,9 +1,9 @@
 #!/bin/bash
-# FARS Pipeline - Setup Script
+# Sibyl System - Setup Script
 # Installs all dependencies including optional MCP servers
 
 set -e
-echo "=== FARS Pipeline Setup ==="
+echo "=== Sibyl System Setup ==="
 
 cd "$(dirname "$0")"
 
@@ -32,8 +32,8 @@ echo "=== Setup complete ==="
 echo ""
 echo "Usage:"
 echo "  source .venv/bin/activate"
-echo "  fars check-tools          # verify installation"
-echo "  fars run 'your topic'     # run a research pipeline"
-echo "  fars list                 # view projects"
+echo "  sibyl check-tools          # verify installation"
+echo "  sibyl run 'your topic'     # run a research pipeline"
+echo "  sibyl list                 # view projects"
 echo ""
 echo "Make sure ANTHROPIC_API_KEY is set in your environment."

@@ -1,6 +1,7 @@
 """Shared workspace management - the communication backbone between agents."""
 import json
 import shutil
+import subprocess
 import time
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
@@ -13,6 +14,7 @@ class WorkspaceStatus:
     updated_at: float = 0.0
     iteration: int = 0
     errors: list = None
+    paused_at: float = 0.0  # 0 = not paused, >0 = pause timestamp
 
     def __post_init__(self):
         if self.errors is None:
@@ -115,6 +117,24 @@ class Workspace:
         status.errors.append({"time": time.time(), "error": error})
         self._save_status(status)
 
+    def pause(self, reason: str = "rate_limit"):
+        status = self.get_status()
+        status.paused_at = time.time()
+        self._save_status(status)
+        self.write_file("logs/pause_log.jsonl",
+            (self.read_file("logs/pause_log.jsonl") or "") +
+            json.dumps({"time": time.time(), "reason": reason,
+                         "stage": status.stage, "iteration": status.iteration},
+                        ensure_ascii=False) + "\n")
+
+    def resume(self):
+        status = self.get_status()
+        status.paused_at = 0.0
+        self._save_status(status)
+
+    def is_paused(self) -> bool:
+        return self.get_status().paused_at > 0
+
     def write_file(self, rel_path: str, content: str):
         path = self.root / rel_path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -155,6 +175,45 @@ class Workspace:
                 if dst.exists():
                     shutil.rmtree(dst)
                 shutil.copytree(src, dst, dirs_exist_ok=True)
+
+    # ══════════════════════════════════════════════
+    # Git version management
+    # ══════════════════════════════════════════════
+
+    def git_init(self):
+        """Initialize git repo in workspace if not already initialized."""
+        if (self.root / ".git").exists():
+            return
+        subprocess.run(["git", "init"], cwd=self.root, capture_output=True)
+        gitignore = "*.pyc\n__pycache__/\n.DS_Store\n"
+        (self.root / ".gitignore").write_text(gitignore)
+        subprocess.run(["git", "add", "."], cwd=self.root, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feat: initialize Sibyl research project"],
+            cwd=self.root, capture_output=True,
+        )
+
+    def git_commit(self, message: str):
+        """Stage all changes and commit."""
+        if not (self.root / ".git").exists():
+            self.git_init()
+        subprocess.run(["git", "add", "."], cwd=self.root, capture_output=True)
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
+            cwd=self.root, capture_output=True,
+        )
+        if result.returncode != 0:  # there are staged changes
+            subprocess.run(
+                ["git", "commit", "-m", message],
+                cwd=self.root, capture_output=True,
+            )
+
+    def git_tag(self, tag: str, message: str = ""):
+        """Create a git tag."""
+        if not (self.root / ".git").exists():
+            return
+        cmd = ["git", "tag", "-a", tag, "-m", message or tag]
+        subprocess.run(cmd, cwd=self.root, capture_output=True)
 
     def get_project_metadata(self) -> dict:
         """Return a summary of the project for status dashboards."""

@@ -1,4 +1,4 @@
-# FARS Agent 通用指令
+# Sibyl Agent 通用指令
 
 ## 语言要求 (CRITICAL)
 
@@ -58,6 +58,8 @@
 │       ├── main.tex
 │       ├── references.bib
 │       └── main.pdf
+├── context/
+│   └── literature.md        # 文献调研报告（arXiv + Web，自动生成）
 ├── supervisor/              # 监督审查
 ├── critic/                  # 批评反馈
 ├── reflection/              # 反思产出

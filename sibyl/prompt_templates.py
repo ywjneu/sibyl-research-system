@@ -1,4 +1,4 @@
-"""Prompt template system for FARS agents.
+"""Prompt template system for Sibyl agents.
 
 Replaces hardcoded prompts with structured templates supporting variable substitution.
 """
@@ -6,7 +6,7 @@ from string import Template
 
 
 class PromptTemplates:
-    """Centralized prompt templates for all FARS agents."""
+    """Centralized prompt templates for all Sibyl agents."""
 
     # ── Ideation templates ──
 
@@ -90,7 +90,7 @@ Instructions:
 4. Save per-seed results to exp/results/full/$task_id/
 5. Save sample outputs (not just metrics)
 6. Set CUDA_VISIBLE_DEVICES=$gpu_id
-7. Use conda environment: conda run -n fars_$project""")
+7. Use conda environment: conda run -n sibyl_$project""")
 
     # ── Writing templates ──
 

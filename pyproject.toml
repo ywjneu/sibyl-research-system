@@ -1,7 +1,7 @@
 [project]
-name = "fars-pipeline"
+name = "sibyl-system"
 version = "0.5.0"
-description = "Fully Automated Research System - Claude Code Native Research Pipeline"
+description = "Sibyl System - 西比拉自动化研究系统 (Claude Code Native)"
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
@@ -9,10 +9,10 @@ dependencies = [
 ]
 
 [project.scripts]
-fars = "fars.cli:main"
+sibyl = "sibyl.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["fars"]
+packages = ["sibyl"]
 
 [build-system]
 requires = ["hatchling"]

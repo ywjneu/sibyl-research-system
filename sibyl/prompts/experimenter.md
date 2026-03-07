@@ -31,12 +31,12 @@ Read from workspace:
 Use `mcp__ssh-mcp-server__execute-command` to run on the remote server:
 - Server: `cs8000d`
 - Set `CUDA_VISIBLE_DEVICES={gpu_id}`
-- Use conda environment: `conda run -n fars_{project}`
+- Use conda environment: `conda run -n sibyl_{project}`
 - Upload scripts first, then execute
 
 Alternatively, use `Bash` with SSH:
 ```bash
-ssh cs8000d "CUDA_VISIBLE_DEVICES={gpu_id} conda run -n fars_{project} python /path/to/script.py"
+ssh cs8000d "CUDA_VISIBLE_DEVICES={gpu_id} conda run -n sibyl_{project} python /path/to/script.py"
 ```
 
 ## Code Requirements

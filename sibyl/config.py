@@ -5,8 +5,8 @@ import yaml
 
 @dataclass
 class AgentConfig:
-    model: str = "claude-sonnet-4-20250514"
-    max_tokens: int = 8192
+    model: str = "claude-opus-4-6"
+    max_tokens: int = 64000
     temperature: float = 0.7
 
 
@@ -25,7 +25,7 @@ class Config:
     # GPU scheduling
     gpu_ids: list[int] = field(default_factory=lambda: [0, 1, 2, 3])
     ssh_server: str = "cs8000d"
-    remote_base: str = "/home/ccwang/fars_pipeline"
+    remote_base: str = "/home/ccwang/sibyl_system"
 
     # Pilot experiments
     pilot_samples: int = 16
@@ -45,6 +45,25 @@ class Config:
 
     # Auto evolution
     evolution_enabled: bool = True
+
+    # Model routing
+    model_tiers: dict = field(default_factory=lambda: {
+        "heavy":    "claude-opus-4-6",
+        "standard": "claude-opus-4-6",
+        "light":    "claude-sonnet-4-6",
+    })
+    agent_tier_map: dict = field(default_factory=lambda: {
+        # Heavy: deep reasoning
+        "synthesizer": "heavy", "supervisor": "heavy",
+        "supervisor_decision": "heavy", "editor": "heavy",
+        "final_critic": "heavy", "critic": "heavy", "reflection": "heavy",
+        # Standard: literature research (needs tool use + reasoning)
+        "literature_researcher": "standard",
+        # Light: simple evaluation
+        "optimist": "light", "skeptic": "light", "strategist": "light",
+        "section_critic": "light", "idea_critique": "light",
+        # Everything else defaults to standard
+    })
 
     @classmethod
     def from_yaml(cls, path: str) -> "Config":
@@ -70,4 +89,8 @@ class Config:
         for key in ["gpu_ids", "pilot_seeds", "full_seeds"]:
             if key in data:
                 setattr(cfg, key, data[key])
+        # Dict fields (model routing)
+        for key in ["model_tiers", "agent_tier_map"]:
+            if key in data:
+                getattr(cfg, key).update(data[key])
         return cfg

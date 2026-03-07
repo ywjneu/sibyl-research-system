@@ -1,7 +1,7 @@
-"""CLI entry point for FARS pipeline (Claude Code native mode).
+"""CLI entry point for Sibyl pipeline (Claude Code native mode).
 
 Provides auxiliary commands for status, evolution, and sync.
-The primary workflow runs through Claude Code's /fars-start skill.
+The primary workflow runs through Claude Code's /sibyl-start skill.
 """
 import argparse
 import json
@@ -9,23 +9,23 @@ import sys
 from pathlib import Path
 
 from rich.console import Console
-from fars.config import Config
+from sibyl.config import Config
 
 console = Console()
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="FARS - Fully Automated Research System (Claude Code Native)",
+        description="Sibyl System - 西比拉自动化研究系统 (Claude Code Native)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Primary usage: Use /fars-start in Claude Code to run the pipeline.
+Primary usage: Use /sibyl-start in Claude Code to run the pipeline.
 
 Auxiliary commands:
-  fars status              Show all projects
-  fars status <project>    Show detailed project status
-  fars evolve              Trigger evolution analysis
-  fars evolve --apply      Apply evolution patches
+  sibyl status              Show all projects
+  sibyl status <project>    Show detailed project status
+  sibyl evolve              Trigger evolution analysis
+  sibyl evolve --apply      Apply evolution patches
 """,
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -37,7 +37,9 @@ Auxiliary commands:
 
     # --- evolve ---
     evolve_p = sub.add_parser("evolve", help="Trigger evolution analysis")
-    evolve_p.add_argument("--apply", action="store_true", help="Apply patches (default: dry run)")
+    evolve_p.add_argument("--apply", action="store_true", help="Generate lessons overlay files")
+    evolve_p.add_argument("--reset", action="store_true", help="Remove all overlay files")
+    evolve_p.add_argument("--show", action="store_true", help="Show current overlay contents")
 
     args = parser.parse_args()
     config = Config()
@@ -48,14 +50,14 @@ Auxiliary commands:
         _status_dashboard(config, getattr(args, "project", None))
 
     elif args.command == "evolve":
-        _evolve(apply=args.apply)
+        _evolve(apply=args.apply, reset=args.reset, show=args.show)
 
 
 def _status_dashboard(config: Config, project: str | None = None):
     """Enhanced project status dashboard."""
     from rich.table import Table
     from rich.panel import Panel
-    from fars.workspace import Workspace
+    from sibyl.workspace import Workspace
 
     ws_dir = config.workspaces_dir
     if not ws_dir.exists():
@@ -92,9 +94,9 @@ def _status_dashboard(config: Config, project: str | None = None):
             f"[bold]Paper:[/bold] {'Yes' if m.get('has_paper') else 'No'}\n"
             f"[bold]Errors:[/bold] {m.get('errors', 0)}"
         )
-        console.print(Panel(panel_content, title=f"FARS Project: {m['name']}", border_style="cyan"))
+        console.print(Panel(panel_content, title=f"Sibyl Project: {m['name']}", border_style="cyan"))
     else:
-        table = Table(title="FARS Projects Dashboard")
+        table = Table(title="Sibyl Projects Dashboard")
         table.add_column("Project", style="cyan")
         table.add_column("Topic", max_width=40)
         table.add_column("Stage", style="green")
@@ -116,11 +118,32 @@ def _status_dashboard(config: Config, project: str | None = None):
         console.print(table)
 
 
-def _evolve(apply: bool = False):
-    """Trigger evolution analysis."""
-    from fars.evolution import EvolutionEngine
+def _evolve(apply: bool = False, reset: bool = False, show: bool = False):
+    """Trigger evolution analysis and manage overlays."""
+    from sibyl.evolution import EvolutionEngine
 
     engine = EvolutionEngine()
+
+    if reset:
+        engine.reset_overlays()
+        console.print("[green]All overlay files removed. Prompts reverted to base.[/green]")
+        return
+
+    if show:
+        overlays = engine.get_overlay_content()
+        if not overlays:
+            console.print("[yellow]No overlay files found.[/yellow]")
+            return
+        for agent_name, content in overlays.items():
+            console.print(f"\n[bold cyan]── {agent_name} ──[/bold cyan]")
+            console.print(content)
+
+        global_path = engine.EVOLUTION_DIR / "global_lessons.md"
+        if global_path.exists():
+            console.print("\n[bold cyan]── Global Lessons ──[/bold cyan]")
+            console.print(global_path.read_text(encoding="utf-8"))
+        return
+
     insights = engine.analyze_patterns()
 
     if not insights:
@@ -130,16 +153,18 @@ def _evolve(apply: bool = False):
     console.print(f"[bold]Found {len(insights)} pattern(s):[/bold]\n")
     for i in insights:
         color = "red" if i.severity == "high" else "yellow"
-        console.print(f"  [{color}]{i.severity.upper()}[/{color}] {i.pattern}")
+        cat = f"[dim]{i.category.upper()}[/dim] " if i.category else ""
+        console.print(f"  [{color}]{i.severity.upper()}[/{color}] {cat}{i.pattern}")
         console.print(f"    Frequency: {i.frequency}x | Stages: {', '.join(i.affected_stages)}")
         console.print(f"    Suggestion: {i.suggestion}\n")
 
-    patches = engine.generate_prompt_patches()
-    if patches:
-        console.print(f"[bold]Generated {len(patches)} prompt patch(es):[/bold]")
-        results = engine.apply_evolution(patches, dry_run=not apply)
-        for key, val in results.items():
-            console.print(f"  {key}: {val}")
+    if apply:
+        written = engine.generate_lessons_overlay()
+        console.print(f"\n[bold green]Generated {len(written)} overlay file(s):[/bold green]")
+        for agent_name in written:
+            console.print(f"  ~/.claude/sibyl_evolution/lessons/{agent_name}.md")
+    else:
+        console.print("[dim]Use --apply to generate overlay files, --show to view, --reset to clear.[/dim]")
 
 
 if __name__ == "__main__":

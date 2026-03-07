@@ -1,4 +1,4 @@
-"""Structured experiment records for FARS v4.
+"""Structured experiment records for Sibyl v4.
 
 JSONL-based experiment database for tracking all experiments.
 """

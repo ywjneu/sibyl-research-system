@@ -1,4 +1,4 @@
-"""Priority-based context builder for FARS agents.
+"""Priority-based context builder for Sibyl agents.
 
 Replaces hard `content[:3000]` truncation with intelligent priority-based
 context management that allocates more tokens to higher-priority content.

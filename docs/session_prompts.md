@@ -6,13 +6,13 @@
 ---
 
 ## Prompt #1
-https://gitlab.com/fars-a 你去看看这个仓，这么多能串起来么，你能用么，能实现https://analemma.ai/blog/introducing-fars/他宣传的这样么
+https://gitlab.com/sibyl-a 你去看看这个仓，这么多能串起来么，你能用么，能实现https://analemma.ai/blog/introducing-fars/他宣传的这样么
 
 ## Prompt #2
 你能参考他的思路搞一个这样的 pipeline 流程么，要用到多 agent 提升效率，你可以根据情况自己搞些 skill、plugin 之类的优化流程和提升效率
 
 ## Prompt #3（系统通知）
-Background command "Run FARS pipeline with CLAUDECODE unset to allow nested sessions" completed (exit code 0)
+Background command "Run Sibyl pipeline with CLAUDECODE unset to allow nested sessions" completed (exit code 0)
 
 ## Prompt #4-#9（/plugin 命令，共6次）
 /plugin
@@ -32,17 +32,17 @@ Unknown skill: ralph-loop
 ## Prompt #14（首次 Ralph Loop 启动 + 主任务 Prompt）
 /ralph-loop:ralph-loop
 现在帮我持续迭代改进以下几个任务
-对于FARS Pipeline的流程上： 1. 持续改进FARS Pipeline，要勤用网络上现有的 mcp、plugin、skill、现成的工具和包等，来持续改进优化整个 pipeline 2. 要根据实际研究过程中出现的报错、问题来优化FARS Pipeline，使其更加完善完备 3. 要善用 agent，思考如何拆分任务，如何写agent 的 prompt，如何协调 agent 的分工能让整个pipeline 更顺更好 4. 当每次研究流程走完后，要有反思过程，要修复改正流程中错误、失败、不好的地方，要将好的经验固化成流程保留下来，持续改进流程 5. 整个流程中应该有单独的监督 agent 以第三方视角来审视流程，提出反思视角和建议 6. 每次系统迭代后都要留存日志，以说明本次迭代改进了哪些方面
+对于Sibyl Pipeline的流程上： 1. 持续改进Sibyl Pipeline，要勤用网络上现有的 mcp、plugin、skill、现成的工具和包等，来持续改进优化整个 pipeline 2. 要根据实际研究过程中出现的报错、问题来优化Sibyl Pipeline，使其更加完善完备 3. 要善用 agent，思考如何拆分任务，如何写agent 的 prompt，如何协调 agent 的分工能让整个pipeline 更顺更好 4. 当每次研究流程走完后，要有反思过程，要修复改正流程中错误、失败、不好的地方，要将好的经验固化成流程保留下来，持续改进流程 5. 整个流程中应该有单独的监督 agent 以第三方视角来审视流程，提出反思视角和建议 6. 每次系统迭代后都要留存日志，以说明本次迭代改进了哪些方面
 
-FARS Pipeline的细节上： 1. 当给出研究方向后，不仅要搜集相关领域的代码、资料和论文，也要在写作的时候学习他们的写作结构、写作风格和写作逻辑，以及整体思路设计、实验设计等 2. 当给出研究方向后要探究哪些方向是可行的，要对 idea 进行反复迭代
+Sibyl Pipeline的细节上： 1. 当给出研究方向后，不仅要搜集相关领域的代码、资料和论文，也要在写作的时候学习他们的写作结构、写作风格和写作逻辑，以及整体思路设计、实验设计等 2. 当给出研究方向后要探究哪些方向是可行的，要对 idea 进行反复迭代
 3. 要设置批判者，对各个环节挑刺，以提升最终研究的质量 4. 每次迭代文章后，都要留存日志，以说明本次迭代改进了哪些方面
 
-然后我们来用一个新的研究课题进行研究，反复迭代推进这个项目，并利用它来迭代改进FARS Pipeline
+然后我们来用一个新的研究课题进行研究，反复迭代推进这个项目，并利用它来迭代改进Sibyl Pipeline
 主题： 将 mask diffusion Language model 与 test time training 结合起来 1. mask diffusion Language model 即 mdlm/dlm，是类似 llada 的模型：https://arxiv.org/abs/2502.09992 2. 去找最新的但是小一点的，类似3/4b 这样的，方便快速实验验证。同时要去找最新的模型，跟上行业进展 3. ttt 参考：https://arxiv.org/html/2501.00663v1，你还应该去找最新的相关领域论文，看看最新进展 4. 我的想法是将 ttt 应用到 dlm 上，因为 dlm 有反复迭代过程，看能否与 ttt 相结合，但也不用拘泥于我的 idea，任何合理的你觉得可行的有潜力好的 idea 都可以 5. 实验 setting 最好是 training-free，或者是只需要很少的训练代价就能实现，方便我们反复迭代，因为 gpu 资源有限
-  关于实验，我配置了 ssh mcp 服务，你现在能连接到cs8000d，用上面的 gpu 跑实验，你可以用 hfd 从 huggingface 上下载所需的权重和数据，所有相关内容都要放在/home/ccwang/fars_pipeline中，不要去动别的文件夹中的内容和文件。gpu 最多只能用 4 张，只能用空闲着没人用的 gpu，避免干扰他人。
+  关于实验，我配置了 ssh mcp 服务，你现在能连接到cs8000d，用上面的 gpu 跑实验，你可以用 hfd 从 huggingface 上下载所需的权重和数据，所有相关内容都要放在/home/ccwang/sibyl_system中，不要去动别的文件夹中的内容和文件。gpu 最多只能用 4 张，只能用空闲着没人用的 gpu，避免干扰他人。
 
 ## Prompt #15（上下文续接 Summary #1）
-> 系统自动注入的上下文 Summary，涵盖：初始 FARS 仓库分析、pipeline 构建、Ralph Loop 设置、研究方向选定等。
+> 系统自动注入的上下文 Summary，涵盖：初始 Sibyl 仓库分析、pipeline 构建、Ralph Loop 设置、研究方向选定等。
 
 ## Prompt #16（重启 Ralph Loop + 同一主任务 Prompt）
 /ralph-loop:ralph-loop
@@ -61,7 +61,7 @@ FARS Pipeline的细节上： 1. 当给出研究方向后，不仅要搜集相关
 /ralph-loop:ralph-loop "（同 Prompt #14 内容）" --max-iterations 20
 
 ## Prompt #21（上下文续接 Summary #2）
-> 系统自动注入的上下文 Summary，涵盖：FARS Pipeline v3 架构、dllm 框架、TTT-DLM 方案设计、supervisor/critic agent 创建等。
+> 系统自动注入的上下文 Summary，涵盖：Sibyl Pipeline v3 架构、dllm 框架、TTT-DLM 方案设计、supervisor/critic agent 创建等。
 
 ## Prompt #22（上下文续接 Summary #3）
 > 系统自动注入的上下文 Summary，涵盖：ReMask-Retry 实验（PPL-Diversity Tradeoff 发现）、v3-v5 代码版本、实验结果汇总等。
