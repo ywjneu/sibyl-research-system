@@ -16,6 +16,8 @@ Interactive initialization. Generates a `spec.md` requirements file and creates 
 
 Start the autonomous research loop. Enters continuous iteration via Ralph Loop.
 
+> **Prerequisite**: Claude Code should be launched with `--dangerously-skip-permissions` for this command to work as intended. Without it, the autonomous loop will be interrupted by hundreds of permission prompts per iteration. See [Getting Started](getting-started.md) for details and security considerations.
+
 ```
 /sibyl-research:start my-project
 ```

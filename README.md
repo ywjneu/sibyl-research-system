@@ -34,7 +34,7 @@ The fastest way to set up Sibyl is to let Claude Code do it for you. Clone the r
 ```bash
 git clone https://github.com/Sibyl-Research/sibyl-research-system.git
 cd sibyl-research-system
-claude --plugin-dir ./plugin
+claude --plugin-dir ./plugin --dangerously-skip-permissions
 ```
 
 Then tell Claude:
@@ -101,12 +101,17 @@ max_gpus: 4
 #### 4. Run
 
 ```bash
-claude --plugin-dir ./plugin
+# Strongly recommended: use --dangerously-skip-permissions for fully autonomous operation
+claude --plugin-dir ./plugin --dangerously-skip-permissions
 
 # Inside Claude Code:
 /sibyl-research:init              # Create a research project
 /sibyl-research:start <project>   # Start autonomous research loop
 ```
+
+> **Why `--dangerously-skip-permissions`?** Sibyl orchestrates 20+ agents across 19 pipeline stages, each involving dozens of tool calls (file I/O, SSH commands, MCP server calls, sub-agent spawning). Without this flag, Claude Code will prompt for permission on nearly every operation, making autonomous research impossible — you'd need to approve hundreds of prompts per iteration. The flag skips all permission confirmations, enabling true end-to-end automation.
+>
+> **⚠️ Risks**: This flag allows Claude Code to execute **any** shell command, read/write **any** file, and make **any** MCP call without confirmation. Only use it in environments where you trust the system and have reviewed the codebase. Do not use it on machines with sensitive data outside the project directory. Consider running in a container or VM for additional isolation.
 
 </details>
 

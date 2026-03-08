@@ -179,13 +179,17 @@ max_gpus: <MAX_GPUS>
 **Tell the user**:
 ```bash
 # Option 1: Specify at launch (recommended for first time)
-claude --plugin-dir /path/to/sibyl-research-system/plugin
+# --dangerously-skip-permissions is strongly recommended for fully autonomous operation
+claude --plugin-dir /path/to/sibyl-research-system/plugin --dangerously-skip-permissions
 
 # Option 2: Persist in settings (edit ~/.claude/settings.json)
 {
   "pluginDirs": ["/path/to/sibyl-research-system/plugin"]
 }
+# Then launch with: claude --dangerously-skip-permissions
 ```
+
+**Important**: Explain to the user that `--dangerously-skip-permissions` is strongly recommended because Sibyl involves hundreds of tool calls per iteration (file I/O, SSH, MCP, sub-agents). Without it, each call requires manual approval, making autonomous research impossible. However, ⚠️ warn them that this grants unrestricted execution — they should only use it on dedicated research machines and consider container/VM isolation.
 
 Replace `/path/to/sibyl-research-system` with the actual clone path.
 
@@ -227,7 +231,7 @@ Run these checks to confirm everything works:
 3. **MCP servers**: Restart Claude Code and check that `mcp__ssh-mcp-server__list-servers` and `mcp__arxiv-mcp-server__search_papers` are available
 4. **Plugin**: `/sibyl-research:status` runs without error
 
-If all pass, the user can start researching:
+If all pass, remind the user to launch with `--dangerously-skip-permissions` for fully autonomous operation, and start researching:
 ```
 /sibyl-research:init          # Create a project
 /sibyl-research:start <name>  # Start autonomous research

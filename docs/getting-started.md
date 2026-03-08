@@ -87,17 +87,22 @@ Sibyl relies on several MCP servers. `setup.sh` configures the required ones aut
 Sibyl is provided as a **Claude Code Plugin**:
 
 ```bash
-# Option 1: Specify plugin dir at startup
-claude --plugin-dir /path/to/sibyl-research-system/plugin
+# Option 1: Specify plugin dir at startup (recommended with --dangerously-skip-permissions)
+claude --plugin-dir /path/to/sibyl-research-system/plugin --dangerously-skip-permissions
 
 # Option 2: Persist in Claude Code settings
 # Edit ~/.claude/settings.json:
 {
   "pluginDirs": ["/path/to/sibyl-research-system/plugin"]
 }
+# Then launch with: claude --dangerously-skip-permissions
 ```
 
 Replace `/path/to/sibyl-research-system` with your actual local path.
+
+> **`--dangerously-skip-permissions` is strongly recommended** for Sibyl to function as designed. Without it, Claude Code will prompt for permission on every tool call — file reads, SSH commands, MCP calls, agent spawns — making autonomous multi-stage research impractical (hundreds of manual approvals per iteration).
+>
+> **⚠️ Security trade-off**: This flag grants Claude Code unrestricted access to execute commands, read/write files, and call MCP tools without confirmation. Only use it on machines dedicated to research, and consider running inside a container or VM. Do not use on systems with sensitive credentials or data outside the project scope.
 
 **Verify plugin loaded:** After starting Claude Code, type `/sibyl-research:status` — if the plugin is loaded, it will execute the status command.
 

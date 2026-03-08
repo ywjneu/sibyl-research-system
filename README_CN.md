@@ -34,7 +34,7 @@ Sibyl 真正的独特之处在于其**双循环架构**：
 ```bash
 git clone https://github.com/Sibyl-Research/sibyl-research-system.git
 cd sibyl-research-system
-claude --plugin-dir ./plugin
+claude --plugin-dir ./plugin --dangerously-skip-permissions
 ```
 
 然后告诉 Claude：
@@ -102,12 +102,17 @@ language: zh                       # 中文模式
 #### 4. 运行
 
 ```bash
-claude --plugin-dir ./plugin
+# 强烈建议：使用 --dangerously-skip-permissions 实现全自动运行
+claude --plugin-dir ./plugin --dangerously-skip-permissions
 
 # 在 Claude Code 中：
 /sibyl-research:init              # 创建研究项目
 /sibyl-research:start <project>   # 启动全自主研究循环
 ```
+
+> **为什么需要 `--dangerously-skip-permissions`？** Sibyl 编排 20+ 个 Agent 执行 19 个 Pipeline 阶段，每个阶段涉及数十次工具调用（文件读写、SSH 命令、MCP 服务器调用、子 Agent 生成等）。不加此标志时，Claude Code 几乎每次操作都会弹出权限确认提示，使全自主研究完全不可行——每轮迭代你需要手动确认数百次。此标志跳过所有权限确认，实现真正的端到端自动化。
+>
+> **⚠️ 风险提示**：此标志允许 Claude Code **不经确认**地执行**任意** shell 命令、读写**任意**文件、发起**任意** MCP 调用。仅在你信任系统且已审查过代码的环境中使用。不要在存放敏感数据的机器上使用（项目目录外的数据可能被访问）。建议在容器或虚拟机中运行以获得额外的隔离保护。
 
 </details>
 
