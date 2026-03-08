@@ -4,7 +4,7 @@ description: Sibyl 飞书同步 agent - 将研究数据同步到飞书云空间
 context: fork
 agent: sibyl-light
 user-invocable: false
-allowed-tools: Read, Write, Glob, Grep, Bash, mcp__lark__docx_builtin_import, mcp__lark__docx_v1_document_rawContent, mcp__lark__bitable_v1_app_create, mcp__lark__bitable_v1_appTable_create, mcp__lark__bitable_v1_appTable_list, mcp__lark__bitable_v1_appTableField_list, mcp__lark__bitable_v1_appTableRecord_create, mcp__lark__bitable_v1_appTableRecord_search, mcp__lark__bitable_v1_appTableRecord_update, mcp__lark__im_v1_chat_list, mcp__lark__im_v1_message_create
+allowed-tools: Read, Write, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, mcp__lark__docx_builtin_import, mcp__lark__docx_v1_document_rawContent, mcp__lark__bitable_v1_app_create, mcp__lark__bitable_v1_appTable_create, mcp__lark__bitable_v1_appTable_list, mcp__lark__bitable_v1_appTableField_list, mcp__lark__bitable_v1_appTableRecord_create, mcp__lark__bitable_v1_appTableRecord_search, mcp__lark__bitable_v1_appTableRecord_update, mcp__lark__im_v1_chat_list, mcp__lark__im_v1_message_create
 ---
 
 # 飞书同步 Agent
@@ -50,6 +50,22 @@ allowed-tools: Read, Write, Glob, Grep, Bash, mcp__lark__docx_builtin_import, mc
 | 迭代日志 | `logs/iterations/master_log.jsonl` | bitable 记录 | 追加新行 |
 | 实验数据 | `exp/experiment_db.jsonl` | bitable 记录 | 追加新行 |
 | 系统进化 | `~/.claude/sibyl_evolution/` | docx | outcomes + lessons |
+
+## 进度追踪
+
+在执行同步前，创建子步骤 Task：
+1. 使用 `TaskCreate` 创建同步进度任务：
+   - title: `飞书同步 [{project}]`
+   - 内容 checklist:
+     - [ ] 读取 registry 和项目状态
+     - [ ] 同步研究日记
+     - [ ] 同步反思报告
+     - [ ] 同步论文
+     - [ ] 同步实验数据多维表格
+     - [ ] 同步系统进化记录
+     - [ ] 更新 Registry
+     - [ ] 团队通知
+2. 每完成一个 Step，使用 `TaskUpdate` 标记对应条目完成
 
 ## 执行流程
 

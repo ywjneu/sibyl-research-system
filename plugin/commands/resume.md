@@ -64,6 +64,16 @@ from sibyl.orchestrate import cli_list_projects  # 列出所有项目
 
 **不存在的函数**：`load_state`、`get_state`、`get_project` 等。查状态用 `cli_status`。
 
+## 进度追踪
+
+在进入 LOOP 之前，创建迭代进度 Task：
+1. 调用 `cli_status` 获取当前 stage 和 iteration
+2. 使用 `TaskCreate` 创建一个主任务：
+   - title: `西比拉 [{project}] 迭代 #{iteration}`
+   - 内容: 列出从当前 stage 到 done 的所有剩余阶段作为 checklist
+   - 阶段全集（按顺序）: literature_search → idea_debate → planning → pilot_experiments → experiment_cycle → result_debate → experiment_decision → writing_outline → writing_sections → writing_critique → writing_integrate → writing_final_review → writing_latex → critic_review → supervisor_review → reflection → lark_sync → quality_gate → done
+3. 每完成一个 stage（cli_record 成功后），使用 `TaskUpdate` 标记该阶段完成
+
 ## 编排循环
 
 ```
@@ -99,6 +109,10 @@ LOOP:
      .venv/bin/python3 -c "from sibyl.orchestrate import cli_record; cli_record('WORKSPACE_PATH', 'STAGE')"
 
   4. 阶段间处理（每次 cli_record 成功后执行）:
+
+     a0. 更新进度 Task:
+         - 使用 TaskUpdate 标记刚完成的 stage 为完成状态
+         - 如果进入新迭代（quality_gate 后），创建新的迭代 Task
 
      a. 阶段汇总:
         - 用 1-3 句中文总结本阶段完成的工作和关键发现

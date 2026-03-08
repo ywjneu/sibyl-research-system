@@ -63,6 +63,13 @@ cd /Users/cwan0785/sibyl-system && .venv/bin/python3 -c "from sibyl.orchestrate 
      cd /Users/cwan0785/sibyl-system && .venv/bin/python3 -c "from sibyl.orchestrate import cli_resume; cli_resume('workspaces/PROJECT')"
      ```
 
+1.5. **创建进度 Task**：
+   - 调用 `cli_status` 获取当前 stage 和 iteration
+   - 使用 `TaskCreate` 创建一个主任务：
+     - title: `西比拉 [{project}] 调试 #{iteration}`
+     - 内容: 列出从当前 stage 到 done 的所有剩余阶段作为 checklist
+     - 阶段全集（按顺序）: literature_search → idea_debate → planning → pilot_experiments → experiment_cycle → result_debate → experiment_decision → writing_outline → writing_sections → writing_critique → writing_integrate → writing_final_review → writing_latex → critic_review → supervisor_review → reflection → lark_sync → quality_gate → done
+
 2. **单步获取下一个 action**：
 ```bash
 cd /Users/cwan0785/sibyl-system && .venv/bin/python3 -c "from sibyl.orchestrate import cli_next; cli_next('workspaces/PROJECT')"
@@ -100,6 +107,8 @@ cd /Users/cwan0785/sibyl-system && .venv/bin/python3 -c "from sibyl.orchestrate 
 ```
 
 5.5. **阶段间处理**（cli_record 成功后执行）：
+
+   a0. **更新进度 Task**：使用 TaskUpdate 标记刚完成的 stage 为完成状态。
 
    a. **阶段汇总**：用 1-3 句中文总结本阶段完成的工作和关键发现。
       如果是长上下文阶段（literature_search, idea_debate, experiment_*,
