@@ -759,6 +759,28 @@ class FarsOrchestrator:
         if current_stage == "reflection" and not self.config.lark_enabled:
             return "quality_gate"
 
+        # quality_gate: check if new iteration needed (mirrors _action_quality_gate logic)
+        if current_stage == "quality_gate":
+            review = self.ws.read_file("supervisor/review_writing.md") or ""
+            match = re.search(r"(?:score|rating|quality)[:\s]*(\d+(?:\.\d+)?)",
+                              review, re.IGNORECASE)
+            qg_score = float(match.group(1)) if match else 5.0
+            iteration = self.ws.get_status().iteration
+            threshold = 8.0
+            max_iters = 10
+            action_plan_raw = self.ws.read_file("reflection/action_plan.json")
+            if action_plan_raw:
+                try:
+                    action_plan = json.loads(action_plan_raw)
+                    threshold = action_plan.get("suggested_threshold_adjustment") or threshold
+                    max_iters = action_plan.get("suggested_max_iterations") or max_iters
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            is_done = (qg_score >= threshold and iteration >= 2) or iteration >= max_iters
+            if not is_done:
+                return "literature_search"  # start new iteration
+            return "done"
+
         try:
             idx = self.STAGES.index(current_stage)
             if idx + 1 < len(self.STAGES):
