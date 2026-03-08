@@ -36,7 +36,7 @@ class Config:
 
     # Aggressive GPU mode: treat GPUs with <25% VRAM usage as available
     # Useful on shared servers where GPUs are allocated but mostly idle
-    gpu_aggressive_mode: bool = False
+    gpu_aggressive_mode: bool = True
     gpu_aggressive_threshold_pct: int = 25  # VRAM usage % below which GPU is "available"
 
     # Pilot experiments
