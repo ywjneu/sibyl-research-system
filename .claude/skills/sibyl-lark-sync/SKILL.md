@@ -15,6 +15,42 @@ allowed-tools: Read, Write, Glob, Grep, Bash, mcp__lark__docx_builtin_import, mc
 
 - Workspace path: $ARGUMENTS
 
+## 飞书云空间目标结构
+
+```
+西比拉研究项目/
+  └── {project}/
+      ├── 研究日记/
+      │   ├── {project} 日记 Part1    ← docx (iter 1-10)
+      │   ├── {project} 日记 Part2    ← docx (iter 11-18)
+      │   └── ...
+      ├── 反思报告/
+      │   ├── {project} 反思 v0       ← docx
+      │   └── {project} 反思 v1       ← docx
+      ├── 论文/
+      │   ├── {project} 论文 v1       ← docx (Markdown 版，PDF 无法上传)
+      │   └── ...
+      ├── 实验数据/
+      │   └── {project} 实验数据      ← bitable (多维表格)
+      │       ├── 实验记录表           ← table (方法、PPL、p值、结论)
+      │       └── 迭代日志表           ← table (迭代、评分、问题数)
+      └── 系统进化/
+          └── {project} 全局经验      ← docx (跨项目经验)
+```
+
+注意：飞书 MCP 无 folder 创建/管理 API，上述结构通过文件命名约定实现，实际文件平铺在应用根目录。通过 `lark_sync/registry.json` 记录所有资源 token。
+
+## 同步数据源
+
+| 数据源 | 本地路径 | 飞书类型 | 说明 |
+|--------|---------|---------|------|
+| 研究日记 | `logs/research_diary.md` | docx（分卷） | 按迭代拆分，增量上传 |
+| 反思报告 | `reflection/reflection.md` | docx | 每迭代一份 |
+| 论文 | `writing/paper.md` | docx | Markdown 版（PDF 不支持） |
+| 迭代日志 | `logs/iterations/master_log.jsonl` | bitable 记录 | 追加新行 |
+| 实验数据 | `exp/experiment_db.jsonl` | bitable 记录 | 追加新行 |
+| 系统进化 | `~/.claude/sibyl_evolution/` | docx | outcomes + lessons |
+
 ## 执行流程
 
 ### Step 1: 读取项目状态和 registry
@@ -74,7 +110,17 @@ cat {workspace}/lark_sync/registry.json 2>/dev/null || echo "{}"
 3. 对比 registry 中的 `last_sync_line` 字段，只写入新增记录
 4. 使用 `mcp__lark__bitable_v1_appTableRecord_create` 写入
 
-### Step 4: 更新 Registry
+### Step 4: 同步系统进化记录（如有）
+
+读取以下文件（可能不存在，跳过即可）：
+- `~/.claude/sibyl_evolution/outcomes.jsonl` — 跨项目实验结论
+- `~/.claude/sibyl_evolution/global_lessons.md` — 全局经验总结
+
+如果存在，合并为一份文档上传：
+- 文件名：`{project} 全局经验`
+- 使用 `mcp__lark__docx_builtin_import`
+
+### Step 5: 更新 Registry
 
 将所有飞书资源 token 写入 `{workspace}/lark_sync/registry.json`：
 
@@ -108,7 +154,7 @@ cat {workspace}/lark_sync/registry.json 2>/dev/null || echo "{}"
 }
 ```
 
-### Step 5: 团队通知（可选）
+### Step 6: 团队通知（可选）
 
 如果有可用的群聊，使用 `mcp__lark__im_v1_message_create` 发送通知：
 「西比拉 [{project}] 迭代 {iteration} 数据已同步」
