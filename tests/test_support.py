@@ -21,7 +21,7 @@ class TestConfig:
         c = Config()
         assert c.ssh_server == "cs8000d"
         assert c.pilot_samples == 16
-        assert c.writing_mode == "sequential"
+        assert c.writing_mode == "parallel"
         assert c.experiment_mode == "ssh_mcp"
         assert c.lark_enabled is True
         assert c.evolution_enabled is True
