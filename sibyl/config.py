@@ -40,7 +40,7 @@ class Config:
     writing_revision_rounds: int = 2
 
     # Lark sync
-    lark_enabled: bool = False
+    lark_enabled: bool = True
     lark_app_token: str = ""
 
     # Auto evolution
