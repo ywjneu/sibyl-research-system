@@ -17,22 +17,94 @@ Sibyl 通过 **状态机编排器** 协调 20+ 个 AI Agent，自动完成文献
 
 ## 工作流程
 
+```mermaid
+graph TD
+    subgraph iteration["🔄 研究迭代循环"]
+        direction TB
+
+        lit["📚 文献调研<br/><i>arXiv + Web 双源搜索</i>"]
+        idea["💡 创意辩论<br/><i>6 Agent 多视角辩论</i>"]
+        plan["📋 实验规划<br/><i>生成 task_plan.json</i>"]
+        pilot["🧪 试点实验<br/><i>小规模可行性验证</i>"]
+        exp["⚡ 正式实验<br/><i>GPU 并行调度执行</i>"]
+        result["📊 结果辩论<br/><i>6 Agent 多视角分析</i>"]
+        decision{"🔀 实验决策"}
+
+        lit --> idea --> plan --> pilot --> exp --> result --> decision
+        decision -- "PIVOT<br/>换方向" --> idea
+    end
+
+    subgraph writing["✍️ 论文撰写"]
+        direction TB
+
+        outline["📝 大纲撰写"]
+        sections["✏️ 章节写作<br/><i>顺序 / 并行 / Codex</i>"]
+        critique["🔍 章节评审<br/><i>6 Agent 交叉评审</i>"]
+        integrate["📖 整合编辑"]
+        final{"📋 终审<br/><i>NeurIPS 级别</i>"}
+        latex["📄 LaTeX 排版<br/><i>编译 PDF</i>"]
+
+        outline --> sections --> critique --> integrate --> final
+        final -- "不达标<br/>≤2轮" --> integrate
+        final -- "达标" --> latex
+    end
+
+    subgraph review["🔬 审稿与反思"]
+        direction TB
+
+        rev["👥 综合审稿<br/><i>Critic + Supervisor + Codex</i>"]
+        reflect["💭 反思总结<br/><i>分类问题 · 记录教训</i>"]
+        lark["☁️ 飞书同步"]
+        gate{"⭐ 质量门控"}
+
+        rev --> reflect --> lark --> gate
+    end
+
+    decision -- "PROCEED<br/>继续" --> outline
+    latex --> rev
+    gate -- "≥8.0 分 & ≥2 轮" --> done["✅ 研究完成"]
+    gate -- "未达标" --> lit
+
+    style iteration fill:#1a1a2e,stroke:#e94560,color:#fff
+    style writing fill:#16213e,stroke:#0f3460,color:#fff
+    style review fill:#0f3460,stroke:#533483,color:#fff
+    style done fill:#2d6a4f,stroke:#40916c,color:#fff
+    style decision fill:#e94560,stroke:#e94560,color:#fff
+    style final fill:#0f3460,stroke:#e94560,color:#fff
+    style gate fill:#533483,stroke:#533483,color:#fff
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    研究迭代循环                               │
-│                                                             │
-│  文献调研 → 创意辩论 → 实验规划 → 试点实验 → 正式实验        │
-│                 ↑                                ↓          │
-│            (PIVOT)    ←    实验决策    ←    结果辩论          │
-│                              ↓ (PROCEED)                    │
-│  大纲撰写 → 章节写作 → 章节评审 → 整合编辑 → 终审           │
-│                                               ↓             │
-│  LaTeX 排版 → 综合审稿 → 反思总结 → 飞书同步 → 质量门控     │
-│       ↓                                          ↓          │
-│    论文 PDF                              分数达标？          │
-│                                         是 → 完成            │
-│                                         否 → 下一轮迭代 ↑    │
-└─────────────────────────────────────────────────────────────┘
+
+### 多 Agent 协作模式
+
+```mermaid
+graph LR
+    subgraph idea_team["创意生成团队"]
+        direction TB
+        i1["🚀 创新者"]
+        i2["🔧 实用主义者"]
+        i3["📐 理论研究者"]
+        i4["⚔️ 反对者"]
+        i5["🌐 跨学科者"]
+        i6["🔬 实验主义者"]
+    end
+
+    subgraph result_team["结果分析团队"]
+        direction TB
+        r1["😊 乐观分析者"]
+        r2["🤨 怀疑论者"]
+        r3["🎯 战略顾问"]
+        r4["📏 方法论者"]
+        r5["📊 比较分析者"]
+        r6["🔄 修正主义者"]
+    end
+
+    idea_team --> syn1["🧠 综合决策者<br/><i>整合为最终提案</i>"]
+    result_team --> syn2["🧠 结果综合者<br/><i>形成统一判断</i>"]
+
+    style idea_team fill:#1a1a2e,stroke:#e94560,color:#fff
+    style result_team fill:#16213e,stroke:#0f3460,color:#fff
+    style syn1 fill:#2d6a4f,stroke:#40916c,color:#fff
+    style syn2 fill:#2d6a4f,stroke:#40916c,color:#fff
 ```
 
 ### 阶段详解
@@ -136,41 +208,67 @@ workspaces/<project>/
 - Python 3.12+
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
 - GPU 服务器（通过 SSH 访问，用于实验执行）
+- （可选）[OpenAI Codex CLI](https://github.com/openai/codex)（启用 Codex 交叉审查时需要）
+- （可选）飞书 MCP Server（启用飞书同步时需要）
 
 ### 安装
 
 ```bash
+# 1. 克隆仓库
 git clone https://github.com/lose4578/sibyl-system.git
 cd sibyl-system
+
+# 2. 创建 Python 虚拟环境
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-### 使用
+### 加载插件
 
-在 Claude Code 中通过 Skill 命令操作：
+Sibyl 以 **Claude Code Plugin** 形式提供交互命令。启动 Claude Code 时需指定插件目录：
 
 ```bash
-# 初始化新研究项目
-/sibyl-research:init
+# 方式一：每次启动时指定（推荐先用此方式体验）
+claude --plugin-dir /path/to/sibyl-system/plugin
 
-# 启动研究（自动进入迭代循环）
-/sibyl-research:start
+# 方式二：在 Claude Code settings.json 中持久化配置
+# 编辑 ~/.claude/settings.json，添加：
+{
+  "pluginDirs": ["/path/to/sibyl-system/plugin"]
+}
+```
 
-# 查看项目状态
-/sibyl-research:status
+> **注意**：将 `/path/to/sibyl-system` 替换为你本地的实际路径。
 
-# 恢复已有项目
-/sibyl-research:continue
+加载成功后，可以在 Claude Code 中使用 `/sibyl-research:*` 系列命令。
 
-# 手动推进到下一步（调试模式）
-/sibyl-research:debug
+### 使用
 
-# 强制切换研究方向
-/sibyl-research:pivot
+在 Claude Code 中通过插件命令操作：
 
-# 停止研究
-/sibyl-research:stop
+```bash
+/sibyl-research:init       # 交互式初始化新研究项目（生成 spec.md）
+/sibyl-research:start      # 启动研究（自动进入持续迭代循环）
+/sibyl-research:status     # 查看所有项目状态
+/sibyl-research:continue   # 恢复已有项目
+/sibyl-research:debug      # 单步执行（调试模式，手动推进每个阶段）
+/sibyl-research:pivot      # 强制切换研究方向
+/sibyl-research:stop       # 停止研究并关闭循环
+/sibyl-research:sync       # 手动同步数据到飞书
+/sibyl-research:evolve     # 跨项目进化分析，提取可复用模式
+```
+
+### SSH 服务器配置
+
+实验执行依赖 SSH 连接到 GPU 服务器。需要配置 [SSH MCP Server](https://github.com/anthropics/claude-code)：
+
+1. 确保 `~/.ssh/config` 中配置了目标服务器（如 `Host cs8000d`）
+2. 在项目的 `config.yaml` 中设置：
+
+```yaml
+ssh_server: "your-gpu-server"
+remote_base: "/path/to/remote/workspace"
+gpu_ids: [0, 1, 2, 3]
 ```
 
 ### 配置
