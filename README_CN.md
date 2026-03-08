@@ -23,6 +23,74 @@ Sibyl 真正的独特之处在于其**双循环架构**：
 
 ---
 
+## 5 分钟快速上手
+
+### 1. 安装
+
+```bash
+git clone https://github.com/Sibyl-Research/sibyl-research-system.git
+cd sibyl-research-system
+chmod +x setup.sh && ./setup.sh
+```
+
+### 2. 配置
+
+设置 API Key 和 GPU 服务器：
+
+```bash
+# 必需
+export ANTHROPIC_API_KEY="sk-ant-..."
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+
+# GPU 服务器 — 必须在 ~/.ssh/config 中配置好 SSH 免密登录
+# 创建根目录配置文件（不提交到 Git）：
+cat > config.yaml << 'EOF'
+ssh_server: "my-gpu-box"           # SSH 主机名
+remote_base: "/home/user/sibyl"    # 服务器上的基础目录
+max_gpus: 4                        # 使用的 GPU 数量
+language: zh                       # 中文模式（默认英文）
+EOF
+```
+
+### 3. 配置 MCP 服务器
+
+在 `~/.mcp.json` 中添加必需的 MCP 服务器：
+
+```json
+{
+  "mcpServers": {
+    "ssh": { "command": "ssh-mcp-server", "args": ["--config", "~/.ssh/config"] },
+    "arxiv": { "command": "uvx", "args": ["arxiv-mcp-server"] }
+  }
+}
+```
+
+> **可选 MCP 服务器**：Google Scholar（学术搜索）、Codex（GPT-5.4 交叉审查）、飞书（云端同步）、bioRxiv（生物预印本）。详见 [MCP 服务器指南](docs/mcp-servers.md)。
+
+### 4. 运行
+
+```bash
+# 加载 Sibyl 插件启动 Claude Code
+claude --plugin-dir ./plugin
+
+# 在 Claude Code 中：
+/sibyl-research:init              # 交互式创建研究项目 → 生成 spec.md
+/sibyl-research:start <project>   # 启动全自主研究循环
+```
+
+系统将自主完成：文献检索 → 想法辩论 → 规划并执行 GPU 实验 → 结果分析 → 论文写作 → 评审迭代 → 直到通过质量门控。
+
+### 5. 监控
+
+```bash
+/sibyl-research:status            # 查看所有项目进度
+/sibyl-research:debug <project>   # 单步调试模式
+```
+
+> **完整安装指南**：[快速上手](docs/getting-started.md) · **全部配置项**：[配置参考](docs/configuration.md) · **GPU 配置**：[SSH & GPU 指南](docs/ssh-gpu-setup.md) · **全部 12 个命令**：[插件命令](docs/plugin-commands.md)
+
+---
+
 ## 系统概览
 
 Sibyl 通过 **19 阶段状态机 Pipeline** 编排 20+ 个 AI Agent，自动完成文献调研、创意生成、实验设计与执行、结果分析、论文写作和同行评审。系统支持多轮迭代优化，内置跨项目学习机制持续提升研究质量。
@@ -222,47 +290,6 @@ workspaces/<project>/
 ├── logs/                       # 迭代归档、研究日志
 └── lark_sync/                  # 飞书同步注册表
 ```
-
-## 快速开始
-
-### 环境要求
-
-- Python 3.12+、Node.js 18+
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
-- GPU 服务器（SSH 可达）
-- `ANTHROPIC_API_KEY` 环境变量
-- `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 环境变量
-
-### 安装与运行
-
-```bash
-git clone https://github.com/Sibyl-Research/sibyl-research-system.git
-cd sibyl-research-system
-chmod +x setup.sh && ./setup.sh
-
-# 加载插件
-claude --plugin-dir ./plugin
-
-# 在 Claude Code 中:
-/sibyl-research:init              # 创建研究项目
-/sibyl-research:start <project>   # 启动自主循环
-```
-
-完整安装指南见 **[快速上手](docs/getting-started.md)**。
-
-### 语言设置
-
-系统默认使用英文输出。如需切换为**中文模式**（Agent 输出、日志、中间产物、控制台消息全部使用中文），可在以下位置配置：
-
-```yaml
-# 全局默认：config.yaml（项目根目录，不提交到 Git）
-language: zh
-
-# 或按项目配置：workspaces/<project>/config.yaml
-language: zh
-```
-
-根目录 `config.yaml` 设置本机全局默认值，项目级 `config.yaml` 可覆盖。论文正文（paper.md、LaTeX）始终使用英文撰写，不受此设置影响。详见[配置参考](docs/configuration.md)。
 
 ## 文档
 

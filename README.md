@@ -23,6 +23,73 @@ What truly sets Sibyl apart is its **dual-loop architecture**:
 
 ---
 
+## Get Started in 5 Minutes
+
+### 1. Install
+
+```bash
+git clone https://github.com/Sibyl-Research/sibyl-research-system.git
+cd sibyl-research-system
+chmod +x setup.sh && ./setup.sh
+```
+
+### 2. Configure
+
+Set up your API key and GPU server:
+
+```bash
+# Required
+export ANTHROPIC_API_KEY="sk-ant-..."
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+
+# GPU server — must be SSH-accessible via ~/.ssh/config
+# Create project root config (git-ignored):
+cat > config.yaml << 'EOF'
+ssh_server: "my-gpu-box"           # SSH host name
+remote_base: "/home/user/sibyl"    # Base dir on GPU server
+max_gpus: 4                        # GPUs to use
+EOF
+```
+
+### 3. Configure MCP Servers
+
+Add required MCP servers to `~/.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "ssh": { "command": "ssh-mcp-server", "args": ["--config", "~/.ssh/config"] },
+    "arxiv": { "command": "uvx", "args": ["arxiv-mcp-server"] }
+  }
+}
+```
+
+> **Optional MCP servers**: Google Scholar (academic search), Codex (GPT-5.4 cross-review), Lark/Feishu (cloud sync), bioRxiv (biology preprints). See [MCP Servers Guide](docs/mcp-servers.md).
+
+### 4. Run
+
+```bash
+# Launch Claude Code with Sibyl plugin
+claude --plugin-dir ./plugin
+
+# Inside Claude Code:
+/sibyl-research:init              # Interactive project setup → generates spec.md
+/sibyl-research:start <project>   # Start fully autonomous research loop
+```
+
+The system will autonomously: search literature → debate ideas → plan & run GPU experiments → analyze results → write paper → review & iterate → until quality gate passes.
+
+### 5. Monitor
+
+```bash
+/sibyl-research:status            # View all project progress
+/sibyl-research:debug <project>   # Single-step mode for debugging
+```
+
+> **Full walkthrough**: [Getting Started Guide](docs/getting-started.md) · **All config options**: [Configuration Reference](docs/configuration.md) · **GPU setup**: [SSH & GPU Guide](docs/ssh-gpu-setup.md) · **All 12 commands**: [Plugin Commands](docs/plugin-commands.md)
+
+---
+
 ## System Overview
 
 Sibyl orchestrates 20+ AI agents through a **19-stage state-machine pipeline**, automatically completing literature survey, idea generation, experiment design & execution, result analysis, paper writing, and peer review. The system supports multi-round iterative optimization with built-in cross-project learning that continuously improves research quality.
@@ -221,47 +288,6 @@ workspaces/<project>/
 ├── logs/                       # Iteration archives, research diary
 └── lark_sync/                  # Feishu/Lark sync registry
 ```
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.12+, Node.js 18+
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
-- GPU server (SSH accessible)
-- `ANTHROPIC_API_KEY` environment variable
-- `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` environment variable
-
-### Install & Run
-
-```bash
-git clone https://github.com/Sibyl-Research/sibyl-research-system.git
-cd sibyl-research-system
-chmod +x setup.sh && ./setup.sh
-
-# Load plugin
-claude --plugin-dir ./plugin
-
-# In Claude Code:
-/sibyl-research:init              # Create a research project
-/sibyl-research:start <project>   # Start autonomous loop
-```
-
-See **[Getting Started Guide](docs/getting-started.md)** for the full walkthrough.
-
-### Language
-
-The system defaults to **English** for all agent output, logs, intermediate artifacts, and console messages. To switch to Chinese:
-
-```yaml
-# Per-project: workspaces/<project>/config.yaml
-language: zh
-
-# Or globally: config.yaml (project root, git-ignored)
-language: zh
-```
-
-Root `config.yaml` sets machine-level defaults; project `config.yaml` overrides them. Papers (paper.md, LaTeX) are always in English. See [Configuration](docs/configuration.md) for details.
 
 ## Documentation
 
