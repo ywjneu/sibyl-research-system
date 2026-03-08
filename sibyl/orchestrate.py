@@ -88,6 +88,7 @@ class Action:
     stage: str = ""
     estimated_minutes: int = 0  # expected runtime hint for experiment batches
     checkpoint_info: dict | None = None  # {resuming, completed_steps, remaining_steps, all_complete}
+    experiment_monitor: dict | None = None  # {script, marker_file, task_ids, timeout_minutes}
 
 
 class FarsOrchestrator:
@@ -591,6 +592,12 @@ class FarsOrchestrator:
             f"预计 {est_min}min{cal_hint}: {gpu_summary}"
         )
 
+        # Build experiment monitor for background progress tracking
+        all_task_ids = []
+        for assignment in batch:
+            all_task_ids.extend(assignment["task_ids"])
+        monitor = self._build_experiment_monitor(all_task_ids, est_min)
+
         action_type = "skills_parallel" if len(skills) > 1 else "skill"
         return Action(
             action_type=action_type,
@@ -598,6 +605,7 @@ class FarsOrchestrator:
             description=desc,
             stage=stage,
             estimated_minutes=est_min,
+            experiment_monitor=monitor,
         )
 
     def _experiment_skill_dict(self, mode: str, ws: str, gpu_ids: list[int],
@@ -635,6 +643,40 @@ class FarsOrchestrator:
             ),
             stage=stage,
         )
+
+    def _build_experiment_monitor(self, task_ids: list[str],
+                                    estimated_minutes: int) -> dict:
+        """Build experiment monitor config for background progress tracking.
+
+        Returns a dict that the main session uses to start a background
+        bash process monitoring task completion on the remote server.
+        """
+        from sibyl.gpu_scheduler import experiment_monitor_script
+
+        project_name = self.ws.name
+        remote_dir = f"{self.config.remote_base}/projects/{project_name}"
+        # Timeout = 2x estimated or minimum 30 min
+        timeout_min = max(30, estimated_minutes * 2) if estimated_minutes > 0 else 0
+        # Poll every 5 min (or 2 min for short tasks)
+        poll_sec = 120 if estimated_minutes <= 15 else 300
+        marker = "/tmp/sibyl_exp_monitor.json"
+
+        script = experiment_monitor_script(
+            ssh_server=self.config.ssh_server,
+            remote_project_dir=remote_dir,
+            task_ids=task_ids,
+            poll_interval_sec=poll_sec,
+            timeout_minutes=timeout_min,
+            marker_file=marker,
+        )
+
+        return {
+            "script": script,
+            "marker_file": marker,
+            "task_ids": task_ids,
+            "timeout_minutes": timeout_min,
+            "poll_interval_sec": poll_sec,
+        }
 
     def _gpu_poll_action(self, stage: str) -> Action:
         """Return a gpu_poll action for the main session to execute.
@@ -1459,6 +1501,19 @@ def cli_checkpoint(workspace_path: str, stage: str, step_id: str):
     print(json.dumps({"status": "ok", "stage": stage, "step": step_id}))
 
 
+def cli_experiment_status():
+    """CLI: Check experiment monitor status.
+
+    Reads the background monitor's marker file and reports task completion status.
+    """
+    from sibyl.gpu_scheduler import read_monitor_result
+    result = read_monitor_result()
+    if result is None:
+        print(json.dumps({"status": "no_monitor", "message": "No experiment monitor running"}))
+    else:
+        print(json.dumps(result, indent=2))
+
+
 def cli_list_projects(workspaces_dir: str = "workspaces"):
     """CLI: List all projects."""
     ws_dir = Path(workspaces_dir)
@@ -1500,7 +1555,7 @@ def cli_init_spec(project_name: str, config_path: str | None = None):
 -
 
 ## 可用资源
-- GPU: 4x on cs8000d
+- GPU: {config.max_gpus}x on {config.ssh_server}
 - 服务器: {config.ssh_server}
 - 远程路径: {config.remote_base}
 

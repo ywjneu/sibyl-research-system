@@ -9,6 +9,7 @@ from sibyl.gpu_scheduler import (
     estimate_batch_minutes, get_batch_info, validate_task_plan,
     nvidia_smi_query_cmd, parse_free_gpus, gpu_poll_wait_script,
     read_poll_result, _compute_calibration_ratio,
+    experiment_monitor_script, read_monitor_result,
 )
 
 
@@ -801,3 +802,94 @@ class TestGetBatchInfoCalibration:
         assert info["calibrated"] is True
         # b estimated 60 * 0.7 = 42
         assert info["estimated_minutes"] == 42
+
+
+# ══════════════════════════════════════════════
+# Experiment monitor
+# ══════════════════════════════════════════════
+
+class TestExperimentMonitorScript:
+    def test_generates_bash_script(self):
+        script = experiment_monitor_script(
+            ssh_server="cs8000d",
+            remote_project_dir="/home/user/sibyl/projects/test",
+            task_ids=["task_1a", "task_2a"],
+        )
+        assert "#!/bin/bash" in script
+        assert "cs8000d" in script
+        assert "task_1a" in script
+        assert "task_2a" in script
+        assert "DONE" in script
+        assert "exp/results" in script
+
+    def test_timeout_included(self):
+        script = experiment_monitor_script(
+            ssh_server="host",
+            remote_project_dir="/path",
+            task_ids=["a"],
+            timeout_minutes=60,
+        )
+        assert "Timeout" in script or "timeout" in script
+        assert "3600" in script  # 60 * 60
+
+    def test_no_timeout_by_default(self):
+        script = experiment_monitor_script(
+            ssh_server="host",
+            remote_project_dir="/path",
+            task_ids=["a"],
+            timeout_minutes=0,
+        )
+        assert "unlimited" in script
+
+    def test_custom_marker_file(self):
+        script = experiment_monitor_script(
+            ssh_server="host",
+            remote_project_dir="/path",
+            task_ids=["a"],
+            marker_file="/custom/marker.json",
+        )
+        assert "/custom/marker.json" in script
+
+    def test_single_task(self):
+        script = experiment_monitor_script(
+            ssh_server="host",
+            remote_project_dir="/path",
+            task_ids=["only_one"],
+        )
+        assert "only_one" in script
+        assert "TOTAL=1" in script
+
+
+class TestReadMonitorResult:
+    def test_file_not_found(self, tmp_path):
+        result = read_monitor_result(str(tmp_path / "nonexistent.json"))
+        assert result is None
+
+    def test_reads_monitoring_status(self, tmp_path):
+        marker = tmp_path / "monitor.json"
+        marker.write_text(json.dumps({
+            "status": "monitoring",
+            "completed": ["task_1a"],
+            "pending": ["task_2a"],
+            "elapsed_sec": 300,
+        }))
+        result = read_monitor_result(str(marker))
+        assert result["status"] == "monitoring"
+        assert result["completed"] == ["task_1a"]
+
+    def test_reads_all_complete(self, tmp_path):
+        marker = tmp_path / "monitor.json"
+        marker.write_text(json.dumps({
+            "status": "all_complete",
+            "completed": ["task_1a", "task_2a"],
+            "pending": [],
+            "elapsed_sec": 600,
+        }))
+        result = read_monitor_result(str(marker))
+        assert result["status"] == "all_complete"
+
+    def test_corrupt_json(self, tmp_path):
+        marker = tmp_path / "monitor.json"
+        marker.write_text("not json")
+        result = read_monitor_result(str(marker))
+        assert result is None

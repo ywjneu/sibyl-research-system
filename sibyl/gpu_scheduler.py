@@ -526,6 +526,137 @@ rm -f "$MARKER"
 '''
 
 
+def experiment_monitor_script(
+    ssh_server: str,
+    remote_project_dir: str,
+    task_ids: list[str],
+    poll_interval_sec: int = 300,
+    timeout_minutes: int = 0,
+    marker_file: str = "/tmp/sibyl_exp_monitor.json",
+    notify_cmd: str = "",
+) -> str:
+    """Generate a bash script that monitors running experiments via SSH.
+
+    The script:
+    1. Periodically checks for DONE marker files on the remote server
+    2. Collects gpu_progress.json updates from completed tasks
+    3. Writes status to local marker_file for the orchestrator to read
+    4. Optionally runs notify_cmd when tasks complete (e.g., lark notification)
+    5. Exits when all monitored tasks have DONE markers or on timeout
+
+    This runs as a pure bash background job — no LLM tokens consumed.
+
+    Args:
+        ssh_server: SSH host to connect to
+        remote_project_dir: Remote project directory (e.g., /home/user/sibyl_system/projects/ttt-dlm)
+        task_ids: List of task IDs to monitor
+        poll_interval_sec: Seconds between checks (default 300 = 5 min)
+        timeout_minutes: Maximum monitoring time; 0 = unlimited
+        marker_file: Local path to write monitoring status JSON
+        notify_cmd: Optional shell command to run on completion (e.g., curl webhook)
+
+    Returns:
+        Bash script string
+    """
+    task_ids_str = " ".join(task_ids)
+    task_count = len(task_ids)
+
+    if timeout_minutes > 0:
+        timeout_sec = timeout_minutes * 60
+        timeout_check = f"""
+    elapsed=$(( $(date +%s) - start_time ))
+    if [ "$elapsed" -gt {timeout_sec} ]; then
+        echo "[monitor] Timeout after {timeout_minutes}min"
+        echo '{{"status": "timeout", "completed": ['$COMPLETED_JSON'], "pending": ['$PENDING_JSON'], "elapsed_sec": '$elapsed'}}' > "$MARKER"
+        exit 1
+    fi"""
+    else:
+        timeout_check = ""
+
+    notify_block = ""
+    if notify_cmd:
+        notify_block = f"""
+        # Notification on task completion
+        {notify_cmd}"""
+
+    return f'''#!/bin/bash
+# Sibyl Experiment Monitor: watch for task completion on {ssh_server}
+# Tasks: {task_ids_str}
+# Poll every {poll_interval_sec}s, timeout: {"unlimited" if timeout_minutes == 0 else f"{timeout_minutes}min"}
+
+MARKER="{marker_file}"
+REMOTE_DIR="{remote_project_dir}"
+ALL_TASKS=({task_ids_str})
+TOTAL={task_count}
+start_time=$(date +%s)
+
+echo '{{"status": "monitoring", "total": {task_count}, "completed": [], "pending": {json.dumps(task_ids)}}}' > "$MARKER"
+
+i=0
+while true; do
+    i=$((i + 1))
+    COMPLETED=""
+    COMPLETED_JSON=""
+    PENDING=""
+    PENDING_JSON=""
+    done_count=0
+
+    for task_id in "${{ALL_TASKS[@]}}"; do
+        # Check for DONE marker file on remote server
+        result=$(ssh {ssh_server} "test -f $REMOTE_DIR/exp/results/${{task_id}}_DONE && echo 'DONE' || echo 'PENDING'" 2>/dev/null)
+
+        if [ "$result" = "DONE" ]; then
+            done_count=$((done_count + 1))
+            if [ -z "$COMPLETED" ]; then
+                COMPLETED="$task_id"
+                COMPLETED_JSON="\\"$task_id\\""
+            else
+                COMPLETED="$COMPLETED,$task_id"
+                COMPLETED_JSON="$COMPLETED_JSON, \\"$task_id\\""
+            fi
+        else
+            if [ -z "$PENDING" ]; then
+                PENDING="$task_id"
+                PENDING_JSON="\\"$task_id\\""
+            else
+                PENDING="$PENDING,$task_id"
+                PENDING_JSON="$PENDING_JSON, \\"$task_id\\""
+            fi
+        fi
+    done
+
+    elapsed=$(( $(date +%s) - start_time ))
+    echo "[monitor $i] $done_count/$TOTAL done (elapsed: ${{elapsed}}s)"
+
+    # Write status to marker file
+    if [ "$done_count" -eq "$TOTAL" ]; then
+        echo '{{"status": "all_complete", "completed": ['$COMPLETED_JSON'], "pending": [], "elapsed_sec": '$elapsed', "poll_count": '$i'}}' > "$MARKER"
+        echo "[monitor] All {task_count} tasks complete!"{notify_block}
+        exit 0
+    fi
+
+    echo '{{"status": "monitoring", "completed": ['$COMPLETED_JSON'], "pending": ['$PENDING_JSON'], "elapsed_sec": '$elapsed', "poll_count": '$i'}}' > "$MARKER"
+{timeout_check}
+    sleep {poll_interval_sec}
+done
+'''
+
+
+def read_monitor_result(marker_file: str = "/tmp/sibyl_exp_monitor.json") -> dict | None:
+    """Read the experiment monitor status file.
+
+    Returns dict with status, completed tasks, pending tasks, etc.
+    Returns None if file doesn't exist.
+    """
+    path = Path(marker_file)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def read_poll_result(marker_file: str = "/tmp/sibyl_gpu_free.json") -> list[int] | None:
     """Read the marker file written by gpu_poll_wait_script.
 

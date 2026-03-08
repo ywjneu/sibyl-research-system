@@ -68,6 +68,19 @@ echo "EXPERIMENT_DONE"
 - 调试错误
 - 执行训练/评估
 - 收集结果到 `results.json`
+- **写入 DONE 标记文件**（见下方）
+
+### 完成标记文件（CRITICAL）
+
+实验 prompt 中**必须**要求服务器端 agent 在每个任务完成后写入 DONE 标记：
+```python
+# 写入路径: {remote_base}/projects/{project}/exp/results/{task_id}_DONE
+import json; Path(f"exp/results/{task_id}_DONE").write_text(json.dumps({
+    "task_id": task_id, "status": "success",  # 或 "failed"
+    "summary": "简要结果摘要", "timestamp": datetime.now().isoformat()
+}))
+```
+系统后台监控进程每 5 分钟通过 SSH 检查这些文件。不写则视为仍在运行。
 
 ### 阶段 C：结果回收（服务器 → 主系统）
 

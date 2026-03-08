@@ -9,7 +9,7 @@ argument-hint: "<spec_path_or_topic>"
 
 **所有用户可见的输出必须使用中文。**
 
-工作目录: `/Users/cwan0785/sibyl-system`
+工作目录: `$SIBYL_ROOT`
 
 ## Python 环境
 
@@ -41,16 +41,16 @@ argument-hint: "<spec_path_or_topic>"
 
 然后执行以下命令获取当前所有项目快照并在横幅中展示：
 ```bash
-cd /Users/cwan0785/sibyl-system && .venv/bin/python3 -c "from sibyl.orchestrate import cli_list_projects; cli_list_projects()"
+cd $SIBYL_ROOT && .venv/bin/python3 -c "from sibyl.orchestrate import cli_list_projects; cli_list_projects()"
 ```
 将结果以简洁表格形式附在横幅后，显示各项目的名称、阶段、迭代数。
 
 1. 判断参数类型并初始化：
 ```bash
 # Markdown 模式（参数以 .md 结尾或包含路径分隔符）
-cd /Users/cwan0785/sibyl-system && .venv/bin/python3 -c "from sibyl.orchestrate import cli_init_from_spec; cli_init_from_spec('SPEC_PATH')"
+cd $SIBYL_ROOT && .venv/bin/python3 -c "from sibyl.orchestrate import cli_init_from_spec; cli_init_from_spec('SPEC_PATH')"
 # Topic 模式
-cd /Users/cwan0785/sibyl-system && .venv/bin/python3 -c "from sibyl.orchestrate import cli_init; cli_init('TOPIC')"
+cd $SIBYL_ROOT && .venv/bin/python3 -c "from sibyl.orchestrate import cli_init; cli_init('TOPIC')"
 ```
 2. 记录返回的 `workspace_path` 和 `project_name`
 3. **自动启动 Ralph Loop 持续迭代**：
@@ -127,6 +127,17 @@ LOOP:
        表示预计运行时间（分钟）。如果 >0，各 subagent 应据此设置
        SSH 超时和轮询间隔，避免过早超时或过度轮询浪费 token。
        实验完成后，编排器会自动检查是否有剩余任务并循环执行下一批。
+
+       **实验监控（experiment_monitor）：**
+       如果 action 包含 experiment_monitor 字段，在启动实验 skill 的同时：
+       1. 将 experiment_monitor.script 写入 /tmp/sibyl_exp_monitor.sh
+       2. 使用 Bash 工具后台执行: `bash /tmp/sibyl_exp_monitor.sh &`（run_in_background）
+       3. 监控脚本会定期 SSH 检查任务 DONE 标记文件
+       4. 进度写入 experiment_monitor.marker_file（默认 /tmp/sibyl_exp_monitor.json）
+       5. 实验 skill 超时未返回时，读取 marker_file 检查实际进度：
+          - status="all_complete": 所有任务已完成，可以收集结果
+          - status="monitoring": 部分完成，继续等待或收集已完成的结果
+          - status="timeout": 监控超时，报告并暂停
      "agents_parallel": 遗留格式（cross-critique 仍用此方式）。
        依次执行 action.agents 列表中的各 agent 任务。
      "team": 使用 Agent Team 进行结构化多 agent 协作讨论。

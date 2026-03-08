@@ -19,7 +19,7 @@ from sibyl.reflection import IterationLogger
 class TestConfig:
     def test_defaults(self):
         c = Config()
-        assert c.ssh_server == "cs8000d"
+        assert c.ssh_server == "gpu-server"
         assert c.pilot_samples == 16
         assert c.writing_mode == "parallel"
         assert c.experiment_mode == "ssh_mcp"
@@ -68,7 +68,7 @@ lark_enabled: false
         yaml_path = tmp_path / "empty.yaml"
         yaml_path.write_text("", encoding="utf-8")
         c = Config.from_yaml(str(yaml_path))
-        assert c.ssh_server == "cs8000d"  # all defaults
+        assert c.ssh_server == "gpu-server"  # all defaults
 
     def test_remote_env_cmd_conda(self):
         c = Config()

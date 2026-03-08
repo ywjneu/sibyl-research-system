@@ -894,6 +894,24 @@ class TestExperimentParallel:
         assert action["estimated_minutes"] == 90  # max of batch
         assert "90min" in action["description"]
 
+    def test_experiment_monitor_included(self, make_orchestrator):
+        """Experiment action should include monitor config for background tracking."""
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
+        tasks = [
+            {"id": "task_1a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 30},
+            {"id": "task_1b", "depends_on": [], "gpu_count": 1, "estimated_minutes": 60},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+        action = o.get_next_action()
+        monitor = action.get("experiment_monitor")
+        assert monitor is not None
+        assert "script" in monitor
+        assert "task_1a" in monitor["script"]
+        assert "task_1b" in monitor["script"]
+        assert monitor["marker_file"] == "/tmp/sibyl_exp_monitor.json"
+        assert set(monitor["task_ids"]) == {"task_1a", "task_1b"}
+        assert monitor["timeout_minutes"] >= 30  # at least 30 min
+
     def test_incomplete_task_plan_redirects_to_planner(self, make_orchestrator):
         """Tasks missing gpu_count/estimated_minutes should trigger planner fix."""
         o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)

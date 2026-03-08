@@ -30,7 +30,7 @@ Read from workspace:
 
 ## Remote Execution
 Use `mcp__ssh-mcp-server__execute-command` to run on the remote server:
-- Server: `cs8000d`
+- Server: `{ssh_server}`
 - Set `CUDA_VISIBLE_DEVICES={gpu_id}`
 - 环境激活: `{env_cmd}`（由项目配置生成，支持 conda/venv）
 - Upload scripts first, then execute
@@ -38,7 +38,7 @@ Use `mcp__ssh-mcp-server__execute-command` to run on the remote server:
 
 Alternatively, use `Bash` with SSH:
 ```bash
-ssh cs8000d "cd {remote_base}/projects/{project} && CUDA_VISIBLE_DEVICES={gpu_id} {env_cmd} python script.py"
+ssh {ssh_server} "cd {remote_base}/projects/{project} && CUDA_VISIBLE_DEVICES={gpu_id} {env_cmd} python script.py"
 ```
 
 ## 远程文件隔离规则 (CRITICAL)
@@ -58,6 +58,31 @@ ssh cs8000d "cd {remote_base}/projects/{project} && CUDA_VISIBLE_DEVICES={gpu_id
 - Save all results as JSON
 - Handle OOM gracefully
 - Make experiments batch-resumable
+
+## 完成标记与通知（CRITICAL）
+
+每个任务完成后**必须**写入 DONE 标记文件，供系统监控进程检测：
+
+```python
+# 任务完成时（成功或失败都要写）
+import json
+from pathlib import Path
+
+def mark_task_done(task_id, results_dir, status="success", summary=""):
+    """Write DONE marker file for system monitor to detect."""
+    marker = Path(results_dir) / f"{task_id}_DONE"
+    marker.write_text(json.dumps({
+        "task_id": task_id,
+        "status": status,  # "success" or "failed"
+        "summary": summary,
+        "timestamp": __import__("datetime").datetime.now().isoformat(),
+    }))
+```
+
+- 文件路径: `{remote_base}/projects/{project}/exp/results/{task_id}_DONE`
+- 成功和失败都要写（status 字段区分）
+- 系统后台监控进程每 5 分钟检查这些文件
+- **不写 DONE 文件的任务会被视为仍在运行，可能触发超时告警**
 
 ## 显存探测与 Batch Size 自动优化（CRITICAL）
 
@@ -135,9 +160,9 @@ timeout to `estimated_minutes * 2` (with a minimum of 10 minutes) to allow
 for variance. For long training jobs (>30 min), use `nohup` + periodic polling:
 ```bash
 # Launch in background
-ssh cs8000d "cd /path && nohup bash run.sh > output.log 2>&1 &"
+ssh {ssh_server} "cd /path && nohup bash run.sh > output.log 2>&1 &"
 # Poll every N minutes (check for completion marker)
-ssh cs8000d "test -f /path/DONE && cat /path/results.json"
+ssh {ssh_server} "test -f /path/DONE && cat /path/results.json"
 ```
 
 ### Progress tracking
