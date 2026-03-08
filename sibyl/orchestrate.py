@@ -131,10 +131,16 @@ class FarsOrchestrator:
         if config is not None:
             self.config = config
         else:
-            # Auto-load project-level config.yaml if it exists
+            # Load config: root config.yaml as base, project config overrides
+            root_config = Path("config.yaml")
             project_config = Path(workspace_path) / "config.yaml"
-            if project_config.exists():
+            if root_config.exists() and project_config.exists():
+                self.config = Config.from_yaml_chain(
+                    str(root_config), str(project_config))
+            elif project_config.exists():
                 self.config = Config.from_yaml(str(project_config))
+            elif root_config.exists():
+                self.config = Config.from_yaml(str(root_config))
             else:
                 self.config = Config()
         self.ws = Workspace(
