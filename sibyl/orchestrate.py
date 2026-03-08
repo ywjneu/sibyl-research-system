@@ -1563,6 +1563,10 @@ def cli_experiment_status(workspace_path: str = ""):
         status, completed, running, pending, total,
         elapsed_min, estimated_remaining_min,
         display (formatted string for direct output to user)
+
+    Note: The caller should extract the 'display' field from the JSON
+    and output it as a text message to the user. Do NOT rely on Bash
+    stdout for display — Claude Code's UI collapses long Bash output.
     """
     import datetime as _dt
     from sibyl.gpu_scheduler import read_monitor_result, _load_progress
