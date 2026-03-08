@@ -45,7 +45,7 @@ class Config:
     codex_model: str = ""  # Codex model (empty = use default; ChatGPT accounts don't support custom models)
 
     # Writing mode
-    writing_mode: str = "sequential"  # "sequential" | "parallel" | "codex"
+    writing_mode: str = "parallel"  # "sequential" | "parallel" | "codex"
     codex_writing_model: str = ""  # Codex writing model (empty = use default)
 
     # Experiment execution
