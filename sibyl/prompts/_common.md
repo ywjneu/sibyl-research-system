@@ -2,19 +2,20 @@
 
 ## Language Requirement (CRITICAL)
 
-**All user-facing output MUST be written in English**, including but not limited to:
-- Research proposals (proposal.md)
-- Experiment reports and result analysis
-- Research diary and process records
-- Paper outlines and review comments
-- Discussions and conclusions
-- Error reports and suggestions
+**All output MUST be written in English**, including:
+- Research proposals (proposal.md), hypotheses, alternatives
+- Experiment reports, result analysis, and logs
+- Research diary (research_diary.md) and stage summaries
+- Paper outlines, section drafts, review comments, and critique
+- Discussions, conclusions, error reports, and suggestions
+- All intermediate artifacts and log files
 
-The following should also use English:
+This includes:
 - Code and code comments
-- JSON data structure keys
+- JSON data structure keys and values
 - Technical terms
-- References
+- References and citations
+- Papers (paper.md, LaTeX sources) — always in English
 
 ## Workspace Conventions
 

@@ -800,7 +800,7 @@ class TestPromptLoading:
         import os
         os.environ.pop("SIBYL_LANGUAGE", None)
         prompt = load_common_prompt()
-        assert "All user-facing output MUST be written in English" in prompt
+        assert "All output MUST be written in English" in prompt
         assert "语言要求" not in prompt
 
     def test_load_common_prompt_zh(self):
@@ -818,7 +818,7 @@ class TestPromptLoading:
         os.environ["SIBYL_LANGUAGE"] = "en"
         try:
             prompt = load_common_prompt()
-            assert "All user-facing output MUST be written in English" in prompt
+            assert "All output MUST be written in English" in prompt
         finally:
             os.environ.pop("SIBYL_LANGUAGE", None)
 
