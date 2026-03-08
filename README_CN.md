@@ -37,6 +37,8 @@ cd sibyl-research-system
 claude --plugin-dir ./plugin --dangerously-skip-permissions
 ```
 
+> ⚠️ `--dangerously-skip-permissions` 允许 Claude Code 不经确认地执行任意 shell 命令、读写文件和 MCP 调用。Sibyl 的多 Agent 自主工作流（每轮迭代数百次工具调用）强烈建议使用此标志，但应仅在专用研究机器上使用。详见[手动配置](#手动配置)中的完整说明和风险缓解建议。
+
 然后告诉 Claude：
 
 > **"帮我配置 Sibyl Research System，读取 docs/setup-guide.md 然后自动配置所有环境。"**

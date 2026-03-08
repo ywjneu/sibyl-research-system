@@ -37,6 +37,8 @@ cd sibyl-research-system
 claude --plugin-dir ./plugin --dangerously-skip-permissions
 ```
 
+> ⚠️ `--dangerously-skip-permissions` grants Claude Code unrestricted execution (shell commands, file I/O, MCP calls) without confirmation. It is strongly recommended for Sibyl's autonomous multi-agent workflow (hundreds of tool calls per iteration), but should only be used on dedicated research machines. See [Manual Setup](#manual-setup) for full details and mitigation advice.
+
 Then tell Claude:
 
 > **"Help me set up Sibyl Research System. Read docs/setup-guide.md and configure everything."**
