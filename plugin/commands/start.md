@@ -28,7 +28,7 @@ argument-hint: "<spec_path_or_topic>"
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
-║           SIBYL SYSTEM  ·  Autonomous Research Engine        ║
+║           SIBYL RESEARCH SYSTEM  ·  Autonomous Research Engine        ║
 ╚══════════════════════════════════════════════════════════════╝
 
   项目：<project_name>
@@ -91,6 +91,7 @@ from sibyl.orchestrate import cli_list_projects  # 列出所有项目
 from sibyl.orchestrate import cli_init       # 初始化（topic 模式）
 from sibyl.orchestrate import cli_init_from_spec # 初始化（spec 模式）
 from sibyl.orchestrate import cli_dispatch_tasks # 动态调度: 空闲 GPU 派发排队任务
+from sibyl.orchestrate import cli_experiment_status # 实验状态面板（含进度、运行任务、预估时间）
 ```
 
 **不存在的函数**：`load_state`、`get_state`、`get_project` 等。查状态用 `cli_status`。
@@ -141,18 +142,28 @@ LOOP:
        WHILE true:
          1. 等待 experiment_monitor.poll_interval_sec 秒
          2. 用 SSH MCP execute-command 执行 check_cmd，解析 task_id:DONE/PENDING
-         3. 读取 marker_file 检查状态:
+         3. **打印状态面板（每次轮询必须执行）：**
+            调用 cli_experiment_status 获取富信息:
+            .venv/bin/python3 -c "from sibyl.orchestrate import cli_experiment_status; cli_experiment_status('WORKSPACE_PATH')"
+            将返回的 display 字段直接输出给用户，内容包含:
+            - 进度条（已完成/总任务）
+            - 运行中任务列表（任务名、GPU、已运行时间）
+            - 排队任务数
+            - 已运行时间和预计剩余时间
+            - "系统正常运行中，请耐心等待..." 提示
+
+         4. 读取 marker_file 检查状态:
             - status="all_complete": 所有任务完成，跳出循环
             - status="timeout": 监控超时，报告并暂停
             - dispatch_needed=true: 有任务刚完成，GPU 释放
 
-         4. **动态调度（dispatch_needed=true 时）：**
+         5. **动态调度（dispatch_needed=true 时）：**
             a. 调用 cli_dispatch_tasks 获取新任务:
                .venv/bin/python3 -c "from sibyl.orchestrate import cli_dispatch_tasks; cli_dispatch_tasks('WORKSPACE_PATH')"
             b. 如果返回 dispatch 非空:
                - 为每个 skill 启动新的 Agent（run_in_background）
                - 更新 check_cmd 加入新 task_ids
-               - 日志: "动态调度: task_X → GPU[Y]"
+               - 输出: "🚀 动态调度: task_X → GPU[Y]"
             c. 如果 dispatch 为空（no_ready_tasks/no_free_gpus）: 继续等待
        ```
 
@@ -161,6 +172,7 @@ LOOP:
        2. 使用 Bash 工具后台执行: `bash /tmp/sibyl_exp_monitor.sh &`（run_in_background）
        3. 监控脚本定期 SSH 检查 DONE 标记文件，进度写入 marker_file
        4. 主 session 定期读取 marker_file，dispatch_needed=true 时调用 cli_dispatch_tasks
+       5. 每次读取 marker_file 后调用 cli_experiment_status 打印状态面板
      "agents_parallel": 遗留格式（cross-critique 仍用此方式）。
        依次执行 action.agents 列表中的各 agent 任务。
      "team": 使用 Agent Team 进行结构化多 agent 协作讨论。
@@ -197,7 +209,20 @@ LOOP:
           - type="codex": 使用 Skill 工具调用 sibyl-codex-reviewer
        8. 收集 teammates 和 post_steps 写入的产出文件
      "bash": 执行 bash_command。
+     "gpu_poll": GPU 轮询等待（所有 GPU 被占用）。
+       按 CLAUDE.md 中的 GPU 轮询协议执行，每次轮询时输出状态提示：
+       ```
+       +-----------------------------------------+
+       |      SIBYL - Waiting for GPUs            |
+       +-----------------------------------------+
+       |  Poll #{N}: No free GPUs available
+       |  Threshold: <threshold>MB free VRAM
+       |  Checking every <interval>min via SSH
+       |  System running, please wait...
+       +-----------------------------------------+
+       ```
      "paused": 项目已暂停，每 5 分钟检查一次，最长等待 5 小时。
+       每次检查时输出: "系统暂停中，等待恢复... (已等待 Xmin)"
      "done": 报告完成，输出 <promise>SIBYL_PIPELINE_COMPLETE</promise>。
 
   错误处理:

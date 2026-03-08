@@ -1,4 +1,4 @@
-# Sibyl System（西比拉系统）
+# Sibyl Research System（西比拉研究系统）
 
 **全自主 AI 科研系统，具备自我进化能力**
 
@@ -37,7 +37,7 @@ claude --plugin-dir ./plugin
 
 然后告诉 Claude：
 
-> **"帮我配置 Sibyl System，读取 docs/setup-guide.md 然后自动配置所有环境。"**
+> **"帮我配置 Sibyl Research System，读取 docs/setup-guide.md 然后自动配置所有环境。"**
 
 Claude 会自动检测你的环境、安装依赖、配置 MCP 服务器、创建配置文件，只在检测不到的信息（GPU 服务器 IP、用户名等）时询问你。[配置指南](docs/setup-guide.md)是一份专为 Claude 设计的分步检查清单。
 
@@ -393,7 +393,7 @@ workspaces/<project>/
 
 ## 横向对比
 
-| 特性 | Sibyl System | [AI Scientist](https://github.com/SakanaAI/AI-Scientist) | [AutoResearch](https://github.com/karpathy/autoresearch) |
+| 特性 | Sibyl Research System | [AI Scientist](https://github.com/SakanaAI/AI-Scientist) | [AutoResearch](https://github.com/karpathy/autoresearch) |
 |------|-------------|-------------|--------------|
 | 架构 | Claude Code 原生（skills, teams, MCP） | API 封装 | 单文件脚本 |
 | Agent 数量 | 20+ 专业化 Agent | 单个 LLM | 单 Agent |

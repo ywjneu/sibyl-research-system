@@ -1,9 +1,9 @@
 #!/bin/bash
-# Sibyl System - Setup Script
+# Sibyl Research System - Setup Script
 # Installs Python environment, dependencies, and configures MCP servers
 
 set -e
-echo "=== Sibyl System Setup ==="
+echo "=== Sibyl Research System Setup ==="
 
 cd "$(dirname "$0")"
 
@@ -116,7 +116,7 @@ MCPEOF
         # Also create config.yaml if it doesn't exist
         if [ ! -f "config.yaml" ]; then
             cat > config.yaml << CFGEOF
-# Sibyl System - Machine-level config (git-ignored)
+# Sibyl Research System - Machine-level config (git-ignored)
 ssh_server: "default"
 remote_base: "/home/$SSH_USER/sibyl_system"
 max_gpus: 4

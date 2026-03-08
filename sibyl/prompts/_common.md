@@ -109,7 +109,7 @@ All research outputs are stored in the shared workspace directory. Use Read and 
 
 ## Self-Evolution Safety (CRITICAL)
 
-When the system self-evolves and modifies Sibyl system files (code under `sibyl/`, prompts under `sibyl/prompts/`, configs, plugin commands, `.claude/` files), the following rules are **mandatory**:
+When the system self-evolves and modifies Sibyl Research System files (code under `sibyl/`, prompts under `sibyl/prompts/`, configs, plugin commands, `.claude/` files), the following rules are **mandatory**:
 
 1. **Write tests**: Every modification to system code must have corresponding test cases in `tests/`. Tests must cover both the new behavior and backward compatibility.
 2. **Pass all tests**: Run `.venv/bin/python3 -m pytest tests/ -v` and ensure ALL tests pass before finalizing any system change. If tests fail, fix the issue — do not skip or delete tests.

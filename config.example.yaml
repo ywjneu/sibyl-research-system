@@ -1,4 +1,4 @@
-# Sibyl System Configuration
+# Sibyl Research System Configuration
 # Copy to project root as config.yaml for machine-level defaults (git-ignored)
 # Or to workspaces/<project>/config.yaml for project-specific overrides
 # Full reference: docs/configuration.md

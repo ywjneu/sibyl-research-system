@@ -16,7 +16,7 @@ console = Console()
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Sibyl System - 西比拉自动化研究系统 (Claude Code Native)",
+        description="Sibyl Research System - 西比拉自动化研究系统 (Claude Code Native)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Primary usage: Use /sibyl-start in Claude Code to run the pipeline.

@@ -1,6 +1,6 @@
 # Getting Started
 
-Complete installation and first-run guide for Sibyl System.
+Complete installation and first-run guide for Sibyl Research System.
 
 > **Fastest path**: Open the cloned repo in Claude Code and say *"Read docs/setup-guide.md and help me set up Sibyl"*. Claude will automatically check your environment and configure everything, only asking for info it can't detect. See [setup-guide.md](setup-guide.md) for the full checklist Claude follows.
 

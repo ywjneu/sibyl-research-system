@@ -8,6 +8,7 @@ import pytest
 from sibyl.orchestrate import (
     FarsOrchestrator, Action, load_prompt, load_common_prompt,
     PAPER_SECTIONS, CHECKPOINT_DIRS, cli_checkpoint, cli_dispatch_tasks,
+    cli_experiment_status,
 )
 from sibyl.config import Config
 from sibyl.workspace import Workspace
@@ -1405,3 +1406,72 @@ class TestExperimentBatchRegistersRunning:
         assert action["experiment_monitor"] is not None
         assert action["experiment_monitor"]["dynamic_dispatch"] is True
         assert "dispatch_cmd" in action["experiment_monitor"]
+
+
+# ══════════════════════════════════════════════
+# Experiment status display
+# ══════════════════════════════════════════════
+
+class TestExperimentStatusDisplay:
+    """Test cli_experiment_status rich output."""
+
+    def test_status_with_workspace(self, make_orchestrator, capsys):
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
+        tasks = [
+            {"id": "task_a", "name": "Train baseline", "depends_on": [],
+             "gpu_count": 1, "estimated_minutes": 30},
+            {"id": "task_b", "name": "Train variant", "depends_on": [],
+             "gpu_count": 1, "estimated_minutes": 20},
+            {"id": "task_c", "name": "Evaluate", "depends_on": ["task_a", "task_b"],
+             "gpu_count": 1, "estimated_minutes": 10},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+        o.ws.write_file("exp/gpu_progress.json", json.dumps({
+            "completed": ["task_a"],
+            "failed": [],
+            "running": {
+                "task_b": {"gpu_ids": [1], "started_at": "2026-03-09T12:00:00"},
+            },
+            "timings": {},
+        }))
+        cli_experiment_status(str(o.ws.root))
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        assert result["completed_count"] == 1
+        assert result["running_count"] == 1
+        assert result["pending_count"] == 1
+        assert result["total_tasks"] == 3
+        assert "display" in result
+        assert "Experiment Monitor" in result["display"]
+        assert "1/3" in result["display"]
+        assert "Train variant" in result["display"]
+        assert "please wait" in result["display"]
+
+    def test_status_without_workspace(self, capsys, tmp_path):
+        """Without workspace path, returns basic monitor status (no display)."""
+        # Remove any leftover monitor file from other tests
+        import os
+        monitor_path = "/tmp/sibyl_exp_monitor.json"
+        if os.path.exists(monitor_path):
+            os.unlink(monitor_path)
+        cli_experiment_status()
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        assert result["status"] == "no_monitor"
+        assert "display" not in result
+
+    def test_status_all_complete(self, make_orchestrator, capsys):
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
+        tasks = [
+            {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+        o.ws.write_file("exp/gpu_progress.json", json.dumps({
+            "completed": ["a"], "failed": [], "running": {}, "timings": {},
+        }))
+        cli_experiment_status(str(o.ws.root))
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        assert result["completed_count"] == 1
+        assert result["running_count"] == 0
+        assert result["pending_count"] == 0

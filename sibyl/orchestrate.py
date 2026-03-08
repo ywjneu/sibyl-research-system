@@ -1553,17 +1553,143 @@ def cli_checkpoint(workspace_path: str, stage: str, step_id: str):
     print(json.dumps({"status": "ok", "stage": stage, "step": step_id}))
 
 
-def cli_experiment_status():
-    """CLI: Check experiment monitor status.
+def cli_experiment_status(workspace_path: str = ""):
+    """CLI: Check experiment status with rich progress information.
 
-    Reads the background monitor's marker file and reports task completion status.
+    Combines monitor status, gpu_progress.json, and task_plan.json to
+    produce a comprehensive status report for user display.
+
+    Output JSON includes:
+        status, completed, running, pending, total,
+        elapsed_min, estimated_remaining_min,
+        display (formatted string for direct output to user)
     """
-    from sibyl.gpu_scheduler import read_monitor_result
-    result = read_monitor_result()
-    if result is None:
-        print(json.dumps({"status": "no_monitor", "message": "No experiment monitor running"}))
-    else:
-        print(json.dumps(result, indent=2))
+    import datetime as _dt
+    from sibyl.gpu_scheduler import read_monitor_result, _load_progress
+
+    monitor = read_monitor_result()
+    result = dict(monitor) if monitor else {"status": "no_monitor"}
+
+    if not workspace_path:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+
+    ws_root = Path(workspace_path)
+    completed, running_ids, running_map, timings = _load_progress(ws_root)
+
+    # Task plan info
+    task_plan_path = ws_root / "plan" / "task_plan.json"
+    total_tasks = 0
+    task_names: dict[str, str] = {}
+    task_estimates: dict[str, int] = {}
+    if task_plan_path.exists():
+        try:
+            plan = json.loads(task_plan_path.read_text(encoding="utf-8"))
+            for t in plan.get("tasks", []):
+                total_tasks += 1
+                task_names[t["id"]] = t.get("name", t["id"])
+                task_estimates[t["id"]] = t.get("estimated_minutes", 0)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    pending_count = max(0, total_tasks - len(completed) - len(running_ids))
+    elapsed_sec = result.get("elapsed_sec", 0)
+    elapsed_min = elapsed_sec // 60 if elapsed_sec else 0
+
+    # Per-task elapsed and remaining estimates
+    max_remaining_sec = 0
+    task_lines = []
+    for tid, info in running_map.items():
+        gpus = info.get("gpu_ids", [])
+        name = task_names.get(tid, tid)
+        started = info.get("started_at", "")
+        task_elapsed_min = 0
+        if started:
+            try:
+                start_dt = _dt.datetime.fromisoformat(started)
+                task_elapsed_min = int(
+                    (_dt.datetime.now() - start_dt).total_seconds() / 60
+                )
+            except (ValueError, TypeError):
+                pass
+        est = task_estimates.get(tid, 0)
+        if est > 0:
+            remaining = max(0, est * 60 - task_elapsed_min * 60)
+            max_remaining_sec = max(max_remaining_sec, remaining)
+
+        gpu_str = ",".join(str(g) for g in gpus)
+        task_lines.append(f"    {name} -> GPU[{gpu_str}] ({task_elapsed_min}min)")
+
+    est_remaining_min = int(max_remaining_sec / 60)
+
+    # Build display string
+    lines = []
+    lines.append("")
+    lines.append(
+        "+-----------------------------------------+"
+    )
+    lines.append(
+        "|      SIBYL - Experiment Monitor          |"
+    )
+    lines.append(
+        "+-----------------------------------------+"
+    )
+
+    # Progress bar
+    if total_tasks > 0:
+        done_pct = len(completed) / total_tasks
+        bar_w = 20
+        filled = int(bar_w * done_pct)
+        bar = "#" * filled + "." * (bar_w - filled)
+        pct_str = f"{int(done_pct * 100)}%"
+        lines.append(
+            f"|  [{bar}] {len(completed)}/{total_tasks} ({pct_str})"
+        )
+
+    # Status
+    status_label = {
+        "all_complete": "ALL DONE",
+        "monitoring": "RUNNING",
+        "timeout": "TIMEOUT",
+        "no_monitor": "INITIALIZING",
+    }.get(result["status"], result["status"])
+    lines.append(f"|  Status: {status_label}")
+
+    # Running tasks
+    if task_lines:
+        lines.append("|  Running:")
+        for tl in task_lines:
+            lines.append(f"|  {tl}")
+
+    # Pending
+    if pending_count > 0:
+        lines.append(f"|  Queued: {pending_count} tasks waiting")
+
+    # Time
+    time_parts = []
+    if elapsed_min > 0:
+        time_parts.append(f"elapsed {elapsed_min}min")
+    if est_remaining_min > 0:
+        time_parts.append(f"~{est_remaining_min}min remaining")
+    if time_parts:
+        lines.append(f"|  Time: {', '.join(time_parts)}")
+
+    lines.append("|")
+    lines.append("|  System running, please wait...")
+    lines.append(
+        "+-----------------------------------------+"
+    )
+    lines.append("")
+
+    result["display"] = "\n".join(lines)
+    result["completed_count"] = len(completed)
+    result["running_count"] = len(running_ids)
+    result["pending_count"] = pending_count
+    result["total_tasks"] = total_tasks
+    result["elapsed_min"] = elapsed_min
+    result["estimated_remaining_min"] = est_remaining_min
+
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 def cli_dispatch_tasks(workspace_path: str):

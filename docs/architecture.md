@@ -1,6 +1,6 @@
 # Architecture
 
-Deep dive into Sibyl System internals. For contributors and advanced users.
+Deep dive into Sibyl Research System internals. For contributors and advanced users.
 
 ## Orchestrator State Machine
 
