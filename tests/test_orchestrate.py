@@ -519,12 +519,14 @@ class TestActionGeneration:
         assert action["action_type"] == "skills_parallel"
 
     def test_experiment_mode_ssh(self, make_orchestrator):
-        o = make_orchestrator(stage="pilot_experiments", experiment_mode="ssh_mcp")
+        o = make_orchestrator(stage="pilot_experiments", experiment_mode="ssh_mcp",
+                              gpu_poll_enabled=False)
         action = o.get_next_action()
         assert action["skills"][0]["name"] == "sibyl-experimenter"
 
     def test_experiment_mode_server_codex(self, make_orchestrator):
-        o = make_orchestrator(stage="pilot_experiments", experiment_mode="server_codex")
+        o = make_orchestrator(stage="pilot_experiments", experiment_mode="server_codex",
+                              gpu_poll_enabled=False)
         action = o.get_next_action()
         assert action["skills"][0]["name"] == "sibyl-server-experimenter"
 
@@ -709,14 +711,14 @@ class TestPromptLoading:
 class TestExperimentParallel:
     def test_no_task_plan_single_agent(self, make_orchestrator):
         """Without task_plan.json, falls back to single-agent mode."""
-        o = make_orchestrator(stage="pilot_experiments")
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
         action = o.get_next_action()
         assert action["action_type"] == "skill"
         assert action["skills"][0]["name"] == "sibyl-experimenter"
 
     def test_with_task_plan_parallel(self, make_orchestrator):
         """With task_plan.json, spawns parallel experiment skills."""
-        o = make_orchestrator(stage="pilot_experiments")
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
         tasks = [
             {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
             {"id": "b", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
@@ -731,7 +733,7 @@ class TestExperimentParallel:
 
     def test_experiment_loop_stays_in_stage(self, make_orchestrator):
         """When tasks remain, stage loops back to itself."""
-        o = make_orchestrator(stage="pilot_experiments")
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
         tasks = [
             {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
             {"id": "b", "depends_on": ["a"], "gpu_count": 1, "estimated_minutes": 10},
@@ -747,7 +749,7 @@ class TestExperimentParallel:
 
     def test_experiment_advances_when_all_done(self, make_orchestrator):
         """When all tasks complete, advances to next stage."""
-        o = make_orchestrator(stage="pilot_experiments")
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
         tasks = [{"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10}]
         o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
         o.ws.write_file("exp/gpu_progress.json", json.dumps({
@@ -758,7 +760,7 @@ class TestExperimentParallel:
 
     def test_experiment_cycle_parallel(self, make_orchestrator):
         """experiment_cycle also supports parallel scheduling."""
-        o = make_orchestrator(stage="experiment_cycle")
+        o = make_orchestrator(stage="experiment_cycle", gpu_poll_enabled=False)
         tasks = [
             {"id": "x", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
             {"id": "y", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
@@ -782,7 +784,8 @@ class TestExperimentParallel:
     def test_server_experimenter_with_tasks(self, make_orchestrator):
         """Server experiment mode also supports --tasks."""
         o = make_orchestrator(stage="pilot_experiments",
-                              experiment_mode="server_codex")
+                              experiment_mode="server_codex",
+                              gpu_poll_enabled=False)
         tasks = [{"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10}]
         o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
         action = o.get_next_action()
@@ -791,7 +794,8 @@ class TestExperimentParallel:
 
     def test_gpus_per_task_config(self, make_orchestrator):
         """gpus_per_task controls GPU allocation per experiment task."""
-        o = make_orchestrator(stage="pilot_experiments", gpus_per_task=2)
+        o = make_orchestrator(stage="pilot_experiments", gpus_per_task=2,
+                              gpu_poll_enabled=False)
         tasks = [
             {"id": "a", "depends_on": [], "gpu_count": 2, "estimated_minutes": 10},
             {"id": "b", "depends_on": [], "gpu_count": 2, "estimated_minutes": 10},
@@ -804,7 +808,7 @@ class TestExperimentParallel:
 
     def test_per_task_gpu_count(self, make_orchestrator):
         """Tasks with per-task gpu_count override the default."""
-        o = make_orchestrator(stage="pilot_experiments")
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
         tasks = [
             {"id": "a", "depends_on": [], "gpu_count": 2, "estimated_minutes": 10},
             {"id": "b", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
@@ -819,7 +823,7 @@ class TestExperimentParallel:
 
     def test_estimated_minutes_in_action(self, make_orchestrator):
         """Action should include estimated_minutes from task plan."""
-        o = make_orchestrator(stage="pilot_experiments")
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
         tasks = [
             {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 30},
             {"id": "b", "depends_on": [], "gpu_count": 1, "estimated_minutes": 90},
@@ -831,7 +835,7 @@ class TestExperimentParallel:
 
     def test_incomplete_task_plan_redirects_to_planner(self, make_orchestrator):
         """Tasks missing gpu_count/estimated_minutes should trigger planner fix."""
-        o = make_orchestrator(stage="pilot_experiments")
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
         tasks = [
             {"id": "a", "depends_on": []},
             {"id": "b", "depends_on": [], "gpu_count": 1},
@@ -845,6 +849,123 @@ class TestExperimentParallel:
 
     def test_no_task_plan_zero_estimated_minutes(self, make_orchestrator):
         """Without task_plan, estimated_minutes defaults to 0."""
-        o = make_orchestrator(stage="pilot_experiments")
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
         action = o.get_next_action()
         assert action["estimated_minutes"] == 0
+
+
+# ══════════════════════════════════════════════
+# GPU polling integration (orchestrator)
+# ══════════════════════════════════════════════
+
+class TestGpuPollingIntegration:
+    """Test GPU polling path in _action_experiment_batch."""
+
+    def test_poll_enabled_no_result_returns_bash_poll(self, make_orchestrator):
+        """When gpu_poll_enabled=True and no poll result, returns bash poll action."""
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=True)
+        action = o.get_next_action()
+        assert action["action_type"] == "bash"
+        assert "nvidia-smi" in action["bash_command"]
+        assert "轮询" in action["description"]
+        assert action["stage"] == "pilot_experiments"
+
+    def test_poll_enabled_with_result_uses_free_gpus(self, make_orchestrator, tmp_path):
+        """When poll result exists, uses free GPUs for scheduling."""
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=True)
+        # Write poll result marker file
+        import tempfile
+        marker = Path("/tmp/sibyl_gpu_free.json")
+        marker.write_text(json.dumps({"free_gpus": [0, 2], "poll_count": 3}))
+        try:
+            tasks = [
+                {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+                {"id": "b", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+            ]
+            o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+            action = o.get_next_action()
+            assert action["action_type"] == "skills_parallel"
+            assert len(action["skills"]) == 2
+            # Should use GPUs 0 and 2 (from poll), not 0,1,2,3 (from config)
+            assert "0" in action["skills"][0]["args"]
+            assert "2" in action["skills"][1]["args"]
+        finally:
+            marker.unlink(missing_ok=True)
+
+    def test_poll_enabled_with_result_single_agent_fallback(self, make_orchestrator):
+        """Poll result + no task plan → single agent with free GPUs."""
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=True)
+        marker = Path("/tmp/sibyl_gpu_free.json")
+        marker.write_text(json.dumps({"free_gpus": [1, 3], "poll_count": 5}))
+        try:
+            action = o.get_next_action()
+            assert action["action_type"] == "skill"
+            assert action["skills"][0]["name"] == "sibyl-experimenter"
+            # Should use free GPUs 1,3
+            assert "1,3" in action["skills"][0]["args"]
+        finally:
+            marker.unlink(missing_ok=True)
+
+    def test_poll_enabled_mismatched_gpus_repolls(self, make_orchestrator):
+        """If polled GPUs don't match config candidates, re-poll."""
+        o = make_orchestrator(
+            stage="pilot_experiments", gpu_poll_enabled=True,
+            gpu_ids=[0, 1],  # only GPUs 0,1 configured
+        )
+        marker = Path("/tmp/sibyl_gpu_free.json")
+        # Poll found GPUs 4,5 which aren't in our config
+        marker.write_text(json.dumps({"free_gpus": [4, 5], "poll_count": 2}))
+        try:
+            action = o.get_next_action()
+            assert action["action_type"] == "bash"
+            assert "nvidia-smi" in action["bash_command"]
+        finally:
+            marker.unlink(missing_ok=True)
+
+    def test_poll_disabled_uses_config_gpus(self, make_orchestrator):
+        """When gpu_poll_enabled=False, uses config.gpu_ids directly."""
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
+        tasks = [
+            {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+        action = o.get_next_action()
+        assert action["action_type"] == "skill"
+        # Default gpu_ids is [0,1,2,3], task gets GPU 0
+        assert "0" in action["skills"][0]["args"]
+
+    def test_poll_action_includes_config_params(self, make_orchestrator):
+        """Poll bash script uses config parameters."""
+        o = make_orchestrator(
+            stage="experiment_cycle",
+            gpu_poll_enabled=True,
+            gpu_free_threshold_mb=4000,
+            gpu_poll_interval_sec=30,
+            gpu_poll_max_attempts=10,
+            ssh_server="myserver",
+        )
+        action = o.get_next_action()
+        assert action["action_type"] == "bash"
+        assert "myserver" in action["bash_command"]
+        assert "4000" in action["bash_command"]
+        assert "30" in action["bash_command"]
+
+    def test_poll_experiment_cycle_also_polls(self, make_orchestrator):
+        """experiment_cycle stage also uses GPU polling when enabled."""
+        o = make_orchestrator(stage="experiment_cycle", gpu_poll_enabled=True)
+        action = o.get_next_action()
+        assert action["action_type"] == "bash"
+        assert "nvidia-smi" in action["bash_command"]
+
+    def test_poll_result_empty_free_gpus_repolls(self, make_orchestrator):
+        """If poll result has empty free_gpus list, effective_gpu_ids is empty → re-poll."""
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=True)
+        marker = Path("/tmp/sibyl_gpu_free.json")
+        marker.write_text(json.dumps({"free_gpus": [], "poll_count": 1}))
+        try:
+            action = o.get_next_action()
+            # Empty free_gpus → no match with config → re-poll
+            assert action["action_type"] == "bash"
+            assert "nvidia-smi" in action["bash_command"]
+        finally:
+            marker.unlink(missing_ok=True)

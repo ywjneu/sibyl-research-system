@@ -7,6 +7,8 @@ import pytest
 from sibyl.gpu_scheduler import (
     topo_sort_layers, assign_gpus, get_next_batch,
     estimate_batch_minutes, get_batch_info, validate_task_plan,
+    nvidia_smi_query_cmd, parse_free_gpus, gpu_poll_wait_script,
+    read_poll_result,
 )
 
 
@@ -410,3 +412,152 @@ class TestValidateTaskPlan:
 
     def test_empty_tasks(self):
         assert validate_task_plan([]) == []
+
+
+# ══════════════════════════════════════════════
+# GPU polling: nvidia_smi_query_cmd
+# ══════════════════════════════════════════════
+
+class TestNvidiaSmiQueryCmd:
+    def test_returns_valid_command(self):
+        cmd = nvidia_smi_query_cmd()
+        assert "nvidia-smi" in cmd
+        assert "--query-gpu=index,memory.used" in cmd
+        assert "noheader" in cmd
+        assert "nounits" in cmd
+
+
+# ══════════════════════════════════════════════
+# GPU polling: parse_free_gpus
+# ══════════════════════════════════════════════
+
+class TestParseFreeGpus:
+    def test_basic_parsing(self):
+        output = "0, 512\n1, 15234\n2, 128\n3, 22000"
+        free = parse_free_gpus(output, [0, 1, 2, 3], threshold_mb=2000)
+        assert free == [0, 2]
+
+    def test_all_free(self):
+        output = "0, 100\n1, 200\n2, 50\n3, 300"
+        free = parse_free_gpus(output, [0, 1, 2, 3], threshold_mb=2000)
+        assert free == [0, 1, 2, 3]
+
+    def test_none_free(self):
+        output = "0, 5000\n1, 8000\n2, 12000\n3, 22000"
+        free = parse_free_gpus(output, [0, 1, 2, 3], threshold_mb=2000)
+        assert free == []
+
+    def test_filters_by_candidate_ids(self):
+        """Only returns GPUs that are in the candidate list."""
+        output = "0, 100\n1, 200\n2, 100\n3, 100"
+        free = parse_free_gpus(output, [0, 2], threshold_mb=2000)
+        assert free == [0, 2]  # GPU 1 and 3 are free but not candidates
+
+    def test_empty_output(self):
+        free = parse_free_gpus("", [0, 1], threshold_mb=2000)
+        assert free == []
+
+    def test_whitespace_and_blank_lines(self):
+        output = "\n  0, 100  \n\n  1, 5000  \n  "
+        free = parse_free_gpus(output, [0, 1], threshold_mb=2000)
+        assert free == [0]
+
+    def test_threshold_boundary(self):
+        """Memory exactly at threshold is NOT free (< not <=)."""
+        output = "0, 2000\n1, 1999"
+        free = parse_free_gpus(output, [0, 1], threshold_mb=2000)
+        assert free == [1]
+
+    def test_malformed_lines_skipped(self):
+        output = "garbage line\n0, 100\nbad\n1, 200"
+        free = parse_free_gpus(output, [0, 1], threshold_mb=2000)
+        assert free == [0, 1]
+
+    def test_float_memory_values(self):
+        """nvidia-smi might output floats in some locales."""
+        output = "0, 512.5\n1, 3000.7"
+        free = parse_free_gpus(output, [0, 1], threshold_mb=2000)
+        assert free == [0]
+
+    def test_sorted_output(self):
+        output = "3, 100\n1, 200\n0, 50"
+        free = parse_free_gpus(output, [0, 1, 3], threshold_mb=2000)
+        assert free == [0, 1, 3]  # sorted
+
+    def test_custom_threshold(self):
+        output = "0, 500\n1, 7000"
+        free = parse_free_gpus(output, [0, 1], threshold_mb=1000)
+        assert free == [0]
+
+
+# ══════════════════════════════════════════════
+# GPU polling: gpu_poll_wait_script
+# ══════════════════════════════════════════════
+
+class TestGpuPollWaitScript:
+    def test_generates_bash_script(self):
+        script = gpu_poll_wait_script("cs8000d", [0, 1, 2, 3])
+        assert "#!/bin/bash" in script
+        assert "nvidia-smi" in script
+        assert "cs8000d" in script
+        assert "0,1,2,3" in script
+
+    def test_custom_parameters(self):
+        script = gpu_poll_wait_script(
+            ssh_server="myserver",
+            candidate_gpu_ids=[0, 2],
+            threshold_mb=4000,
+            poll_interval_sec=30,
+            max_polls=10,
+            marker_file="/tmp/test_marker.json",
+        )
+        assert "myserver" in script
+        assert "0,2" in script
+        assert "4000" in script
+        assert "30" in script  # poll interval
+        assert "10" in script  # max polls
+        assert "/tmp/test_marker.json" in script
+
+    def test_marker_file_path(self):
+        script = gpu_poll_wait_script(
+            "host", [0], marker_file="/custom/path.json"
+        )
+        assert "/custom/path.json" in script
+
+    def test_single_gpu(self):
+        script = gpu_poll_wait_script("host", [2])
+        assert ",2," in script  # in case pattern
+
+
+# ══════════════════════════════════════════════
+# GPU polling: read_poll_result
+# ══════════════════════════════════════════════
+
+class TestReadPollResult:
+    def test_file_not_found(self, tmp_path):
+        result = read_poll_result(str(tmp_path / "nonexistent.json"))
+        assert result is None
+
+    def test_reads_valid_json(self, tmp_path):
+        marker = tmp_path / "marker.json"
+        marker.write_text(json.dumps({"free_gpus": [0, 2], "poll_count": 3}))
+        result = read_poll_result(str(marker))
+        assert result == [0, 2]
+
+    def test_empty_free_gpus(self, tmp_path):
+        marker = tmp_path / "marker.json"
+        marker.write_text(json.dumps({"free_gpus": [], "poll_count": 1}))
+        result = read_poll_result(str(marker))
+        assert result == []
+
+    def test_corrupt_json(self, tmp_path):
+        marker = tmp_path / "marker.json"
+        marker.write_text("not json {{{")
+        result = read_poll_result(str(marker))
+        assert result is None
+
+    def test_missing_key(self, tmp_path):
+        marker = tmp_path / "marker.json"
+        marker.write_text(json.dumps({"poll_count": 5}))
+        result = read_poll_result(str(marker))
+        assert result == []  # default from .get()
