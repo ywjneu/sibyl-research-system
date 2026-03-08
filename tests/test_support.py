@@ -7,7 +7,7 @@ import pytest
 
 from sibyl.config import Config, AgentConfig
 from sibyl.context_builder import ContextBuilder, estimate_tokens, truncate_to_tokens
-from sibyl.evolution import EvolutionEngine, IssueCategory, EvolutionInsight, OutcomeRecord
+from sibyl.evolution import EvolutionEngine, IssueCategory, EvolutionInsight, OutcomeRecord, DigestEntry
 from sibyl.experiment_records import ExperimentDB, ExperimentRecord
 from sibyl.reflection import IterationLogger
 
@@ -276,6 +276,130 @@ class TestEvolutionEngine:
                               classified_issues=ci)
         outcomes = engine._load_outcomes()
         assert outcomes[0]["classified_issues"][0]["category"] == "writing"
+
+    def test_record_success_patterns(self, tmp_path, monkeypatch):
+        """Success patterns should be stored in outcome records."""
+        monkeypatch.setattr(EvolutionEngine, "EVOLUTION_DIR", tmp_path / "evo")
+        engine = EvolutionEngine()
+        engine.record_outcome("proj", "reflection", [], 8.0,
+                              success_patterns=["good ablation design", "clear writing"])
+        outcomes = engine._load_outcomes()
+        assert outcomes[0]["success_patterns"] == ["good ablation design", "clear writing"]
+
+    def test_build_digest(self, tmp_path, monkeypatch):
+        """Digest should aggregate outcomes into pattern entries."""
+        monkeypatch.setattr(EvolutionEngine, "EVOLUTION_DIR", tmp_path / "evo")
+        engine = EvolutionEngine()
+        for _ in range(3):
+            engine.record_outcome("proj", "reflection", ["SSH timeout"], 5.0)
+        engine.record_outcome("proj", "reflection", ["weak writing"], 6.0)
+        digest = engine.build_digest()
+        assert len(digest) >= 1
+        ssh_entry = [d for d in digest if "ssh" in d.pattern_summary]
+        assert len(ssh_entry) == 1
+        assert ssh_entry[0].total_occurrences == 3
+        assert ssh_entry[0].category == "system"
+
+    def test_digest_cache(self, tmp_path, monkeypatch):
+        """Digest should use cache when outcomes haven't changed."""
+        monkeypatch.setattr(EvolutionEngine, "EVOLUTION_DIR", tmp_path / "evo")
+        engine = EvolutionEngine()
+        for _ in range(3):
+            engine.record_outcome("proj", "reflection", ["recurring"], 5.0)
+        d1 = engine.build_digest()
+        d2 = engine.build_digest()  # should use cache
+        assert len(d1) == len(d2)
+
+    def test_effectiveness_tracking(self, tmp_path, monkeypatch):
+        """Issues with improving scores should be marked effective."""
+        monkeypatch.setattr(EvolutionEngine, "EVOLUTION_DIR", tmp_path / "evo")
+        engine = EvolutionEngine()
+        # Early: low scores with this issue
+        for _ in range(3):
+            engine.record_outcome("proj", "reflection", ["bad analysis"], 4.0)
+        # Late: higher scores (lesson took effect)
+        for _ in range(3):
+            engine.record_outcome("proj", "reflection", ["bad analysis"], 8.0)
+        digest = engine.build_digest()
+        entry = [d for d in digest if "bad analysis" in d.pattern_summary][0]
+        assert entry.effectiveness == "effective"
+        assert entry.effectiveness_delta > 0
+
+    def test_ineffective_deprioritized(self, tmp_path, monkeypatch):
+        """Ineffective lessons should have reduced weighted frequency."""
+        monkeypatch.setattr(EvolutionEngine, "EVOLUTION_DIR", tmp_path / "evo")
+        engine = EvolutionEngine()
+        # Early: decent scores
+        for _ in range(3):
+            engine.record_outcome("proj", "reflection", ["persistent issue"], 7.0)
+        # Late: scores declined (lesson not helping)
+        for _ in range(3):
+            engine.record_outcome("proj", "reflection", ["persistent issue"], 4.0)
+        insights = engine.analyze_patterns()
+        assert len(insights) >= 1
+        ins = insights[0]
+        assert ins.effectiveness == "ineffective"
+        # weighted_frequency should be reduced by 0.3x factor
+        assert ins.weighted_frequency < 3.0  # without penalty would be ~6.0
+
+    def test_filter_relevant_lessons(self, tmp_path, monkeypatch):
+        """Relevance filtering should prioritize stage-matching categories."""
+        monkeypatch.setattr(EvolutionEngine, "EVOLUTION_DIR", tmp_path / "evo")
+        engine = EvolutionEngine()
+        # Record system and writing issues
+        for _ in range(3):
+            engine.record_outcome("proj", "reflection", ["SSH connection failed"], 5.0)
+        for _ in range(3):
+            engine.record_outcome("proj", "reflection", ["Paper writing clarity issues"], 5.0)
+        result = engine.filter_relevant_lessons(
+            agent_name="experimenter", stage="experiment"
+        )
+        # Experimenter should see system issues (relevant to experiments) ranked higher
+        assert "SSH" in result.lower() or "ssh" in result.lower()
+
+    def test_overlay_includes_success_section(self, tmp_path, monkeypatch):
+        """Generated overlay should include success patterns section."""
+        monkeypatch.setattr(EvolutionEngine, "EVOLUTION_DIR", tmp_path / "evo")
+        engine = EvolutionEngine()
+        for _ in range(3):
+            engine.record_outcome("proj", "reflection", ["test issue"], 5.0,
+                                  success_patterns=["good baseline comparison"])
+        written = engine.generate_lessons_overlay()
+        assert len(written) > 0
+        # At least one overlay should have success section
+        any_success = any("继续保持" in content for content in written.values())
+        assert any_success
+
+    def test_self_check_declining_trend(self, tmp_path, monkeypatch):
+        """Declining scores should trigger diagnostic."""
+        monkeypatch.setattr(EvolutionEngine, "EVOLUTION_DIR", tmp_path / "evo")
+        engine = EvolutionEngine()
+        engine.record_outcome("proj", "reflection", [], 7.0)
+        engine.record_outcome("proj", "reflection", [], 5.0)
+        engine.record_outcome("proj", "reflection", [], 3.0)
+        diag = engine.get_self_check_diagnostics("proj")
+        assert diag is not None
+        assert diag["declining_trend"] is True
+
+    def test_self_check_recurring_errors(self, tmp_path, monkeypatch):
+        """Recurring system errors should trigger diagnostic."""
+        monkeypatch.setattr(EvolutionEngine, "EVOLUTION_DIR", tmp_path / "evo")
+        engine = EvolutionEngine()
+        for _ in range(5):
+            engine.record_outcome("proj", "reflection", ["SSH connection timeout"], 5.0)
+        diag = engine.get_self_check_diagnostics("proj")
+        assert diag is not None
+        assert "recurring_errors" in diag
+
+    def test_self_check_all_clear(self, tmp_path, monkeypatch):
+        """Good outcomes should return None diagnostic."""
+        monkeypatch.setattr(EvolutionEngine, "EVOLUTION_DIR", tmp_path / "evo")
+        engine = EvolutionEngine()
+        engine.record_outcome("proj", "reflection", [], 7.0)
+        engine.record_outcome("proj", "reflection", [], 8.0)
+        engine.record_outcome("proj", "reflection", [], 9.0)
+        diag = engine.get_self_check_diagnostics("proj")
+        assert diag is None
 
 
 # ══════════════════════════════════════════════
