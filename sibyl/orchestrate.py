@@ -35,40 +35,16 @@ CHECKPOINT_DIRS = {
 }
 
 
-def load_prompt(
-    agent_name: str,
-    overlay_content: str | None = None,
-    language: str | None = None,
-) -> str:
+def load_prompt(agent_name: str, overlay_content: str | None = None) -> str:
     """Load an agent prompt from the prompts/ directory, with overlay injection.
 
-    Language resolution order:
-    1. Explicit `language` parameter
-    2. SIBYL_LANGUAGE environment variable (set by orchestrator)
-    3. Default "zh"
-
-    If language is "en", tries prompts/en/{agent}.md first, falls back to
-    prompts/{agent}.md. Writing-related prompts are always in English
-    (academic papers), so they only exist in the base directory.
+    If overlay_content is provided (e.g. from filter_relevant_lessons),
+    use it instead of the global overlay file.
     """
-    import os
-    lang = language or os.environ.get("SIBYL_LANGUAGE", "zh")
-
-    # Try language-specific prompt first
-    if lang != "zh":
-        lang_path = PROMPTS_DIR / lang / f"{agent_name}.md"
-        if lang_path.exists():
-            base = lang_path.read_text(encoding="utf-8")
-        else:
-            path = PROMPTS_DIR / f"{agent_name}.md"
-            if not path.exists():
-                return ""
-            base = path.read_text(encoding="utf-8")
-    else:
-        path = PROMPTS_DIR / f"{agent_name}.md"
-        if not path.exists():
-            return ""
-        base = path.read_text(encoding="utf-8")
+    path = PROMPTS_DIR / f"{agent_name}.md"
+    if not path.exists():
+        return ""
+    base = path.read_text(encoding="utf-8")
 
     if overlay_content is not None:
         if overlay_content.strip():
@@ -118,11 +94,15 @@ The following should also use English:
 - References"""
 
 
-def load_common_prompt(language: str | None = None) -> str:
-    """Load the common instructions prompt with language-appropriate block."""
+def load_common_prompt() -> str:
+    """Load the common instructions prompt with language-appropriate block.
+
+    Reads SIBYL_LANGUAGE env var (set by plugin commands from action.language).
+    Default "zh". When "en", replaces the Chinese language requirement block.
+    """
     import os
-    lang = language or os.environ.get("SIBYL_LANGUAGE", "zh")
-    base = load_prompt("_common", language=lang)
+    lang = os.environ.get("SIBYL_LANGUAGE", "zh")
+    base = load_prompt("_common")
 
     # Replace language block based on config
     if lang == "en" and _LANG_BLOCK_ZH in base:
@@ -154,7 +134,6 @@ class Action:
     estimated_minutes: int = 0  # expected runtime hint for experiment batches
     checkpoint_info: dict | None = None  # {resuming, completed_steps, remaining_steps, all_complete}
     experiment_monitor: dict | None = None  # {script, marker_file, task_ids, timeout_minutes}
-    language: str = "zh"  # user-facing language for prompt loading
 
 
 class FarsOrchestrator:
