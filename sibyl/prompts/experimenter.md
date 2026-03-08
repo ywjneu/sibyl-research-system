@@ -132,10 +132,53 @@ ssh cs8000d "test -f /path/DONE && cat /path/results.json"
 
 ### Progress tracking
 After completing all assigned tasks, update `{workspace}/exp/gpu_progress.json`:
-  1. Read existing file (or create `{"completed": [], "failed": []}`)
+  1. Read existing file (or create `{"completed": [], "failed": [], "timings": {}}`)
   2. Append completed task IDs to `completed` array
   3. Append failed task IDs to `failed` array
-  4. Write back atomically (read → modify → write)
+  4. Record timing for each task in `timings`:
+     ```json
+     "timings": {
+       "task_1a": {
+         "planned_min": 30,
+         "actual_min": 22,
+         "start_time": "2026-03-09T12:00:00",
+         "end_time": "2026-03-09T12:22:00"
+       }
+     }
+     ```
+     - `planned_min`: from task_plan.json `estimated_minutes`
+     - `actual_min`: wall-clock time from start to finish (rounded to integer)
+     - Record timing even for failed tasks (helps calibrate future estimates)
+  5. Write back atomically (read → modify → write)
+
+**Why timing matters**: The orchestrator uses actual/planned ratios from completed tasks
+to calibrate time estimates for future batches. Accurate timing data leads to better
+scheduling and more realistic progress reporting.
+
+  6. Record experiment configuration summary in `config_snapshot`:
+     ```json
+     "timings": {
+       "task_1a": {
+         "planned_min": 30,
+         "actual_min": 22,
+         "start_time": "...", "end_time": "...",
+         "config_snapshot": {
+           "model": "bert-base-uncased",
+           "batch_size": 64,
+           "seq_len": 512,
+           "dataset_size": 10000,
+           "gpu_model": "RTX 4090",
+           "gpu_count": 1
+         }
+       }
+     }
+     ```
+     The orchestrator uses config snapshots to intelligently adjust time predictions
+     when experiment configurations change between iterations. For example:
+     - Dataset size doubles → scale estimate proportionally
+     - Switching from bert-base to bert-large → expect longer training
+     - Batch size halved (OOM fallback) → more iterations needed
+     Record whatever config fields are relevant to execution time.
 
 When `--tasks` is NOT present, execute all tasks in task_plan.json (legacy behavior).
 

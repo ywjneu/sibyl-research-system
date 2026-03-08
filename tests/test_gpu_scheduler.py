@@ -8,7 +8,7 @@ from sibyl.gpu_scheduler import (
     topo_sort_layers, assign_gpus, get_next_batch,
     estimate_batch_minutes, get_batch_info, validate_task_plan,
     nvidia_smi_query_cmd, parse_free_gpus, gpu_poll_wait_script,
-    read_poll_result,
+    read_poll_result, _compute_calibration_ratio,
 )
 
 
@@ -670,3 +670,134 @@ class TestAggressiveMode:
         )
         assert "aggressive" in script.lower() or "流氓" in script or "pct" in script
         assert "memory.total" in script
+
+
+# ══════════════════════════════════════════════
+# Calibration ratio
+# ══════════════════════════════════════════════
+
+class TestComputeCalibrationRatio:
+    def test_empty_timings(self):
+        assert _compute_calibration_ratio({}) == 1.0
+
+    def test_single_timing(self):
+        timings = {"a": {"planned_min": 30, "actual_min": 21}}
+        ratio = _compute_calibration_ratio(timings)
+        assert ratio == pytest.approx(0.7)
+
+    def test_multiple_timings_median_odd(self):
+        timings = {
+            "a": {"planned_min": 30, "actual_min": 21},   # 0.7
+            "b": {"planned_min": 60, "actual_min": 30},   # 0.5
+            "c": {"planned_min": 20, "actual_min": 20},   # 1.0
+        }
+        # sorted: [0.5, 0.7, 1.0] → median = 0.7
+        assert _compute_calibration_ratio(timings) == pytest.approx(0.7)
+
+    def test_multiple_timings_median_even(self):
+        timings = {
+            "a": {"planned_min": 10, "actual_min": 5},    # 0.5
+            "b": {"planned_min": 10, "actual_min": 8},    # 0.8
+            "c": {"planned_min": 10, "actual_min": 10},   # 1.0
+            "d": {"planned_min": 10, "actual_min": 12},   # 1.2
+        }
+        # sorted: [0.5, 0.8, 1.0, 1.2] → median = (0.8 + 1.0) / 2 = 0.9
+        assert _compute_calibration_ratio(timings) == pytest.approx(0.9)
+
+    def test_skips_zero_planned(self):
+        timings = {
+            "a": {"planned_min": 0, "actual_min": 10},
+            "b": {"planned_min": 30, "actual_min": 21},  # 0.7
+        }
+        assert _compute_calibration_ratio(timings) == pytest.approx(0.7)
+
+    def test_skips_zero_actual(self):
+        timings = {
+            "a": {"planned_min": 30, "actual_min": 0},
+            "b": {"planned_min": 20, "actual_min": 30},  # 1.5
+        }
+        assert _compute_calibration_ratio(timings) == pytest.approx(1.5)
+
+    def test_skips_missing_fields(self):
+        timings = {
+            "a": {"planned_min": 30},                     # missing actual
+            "b": {"actual_min": 10},                      # missing planned
+            "c": {"planned_min": 20, "actual_min": 10},   # 0.5
+        }
+        assert _compute_calibration_ratio(timings) == pytest.approx(0.5)
+
+    def test_all_invalid_returns_default(self):
+        timings = {
+            "a": {"planned_min": 0, "actual_min": 0},
+            "b": {},
+        }
+        assert _compute_calibration_ratio(timings) == 1.0
+
+
+class TestEstimateBatchMinutesWithCalibration:
+    def test_calibrated_estimate(self):
+        tasks = [
+            {"id": "a", "estimated_minutes": 60},
+            {"id": "b", "estimated_minutes": 30},
+        ]
+        batch = [
+            {"task_ids": ["a"], "gpu_ids": [0]},
+            {"task_ids": ["b"], "gpu_ids": [1]},
+        ]
+        # ratio 0.5 → a: 60*0.5=30, b: 30*0.5=15, max=30
+        timings = {"x": {"planned_min": 10, "actual_min": 5}}
+        assert estimate_batch_minutes(batch, tasks, timings=timings) == 30
+
+    def test_uses_actual_for_rerun_task(self):
+        """If a task has actual timing data, use that instead of calibrated estimate."""
+        tasks = [{"id": "a", "estimated_minutes": 60}]
+        batch = [{"task_ids": ["a"], "gpu_ids": [0]}]
+        timings = {"a": {"planned_min": 60, "actual_min": 22}}
+        assert estimate_batch_minutes(batch, tasks, timings=timings) == 22
+
+    def test_no_timings_no_calibration(self):
+        tasks = [{"id": "a", "estimated_minutes": 60}]
+        batch = [{"task_ids": ["a"], "gpu_ids": [0]}]
+        assert estimate_batch_minutes(batch, tasks, timings=None) == 60
+
+    def test_calibration_with_ratio_gt_1(self):
+        """Tasks taking longer than planned → ratio > 1."""
+        tasks = [{"id": "a", "estimated_minutes": 30}]
+        batch = [{"task_ids": ["a"], "gpu_ids": [0]}]
+        timings = {"x": {"planned_min": 10, "actual_min": 15}}  # ratio 1.5
+        assert estimate_batch_minutes(batch, tasks, timings=timings) == 45  # 30 * 1.5
+
+
+class TestGetBatchInfoCalibration:
+    def test_no_timings_ratio_1(self, tmp_path):
+        plan_dir = tmp_path / "plan"
+        plan_dir.mkdir()
+        tasks = [{"id": "a", "depends_on": [], "estimated_minutes": 30}]
+        (plan_dir / "task_plan.json").write_text(json.dumps({"tasks": tasks}))
+
+        info = get_batch_info(tmp_path, [0])
+        assert info["calibration_ratio"] == 1.0
+        assert info["calibrated"] is False
+
+    def test_with_timings_returns_ratio(self, tmp_path):
+        plan_dir = tmp_path / "plan"
+        plan_dir.mkdir()
+        tasks = [
+            {"id": "a", "depends_on": [], "estimated_minutes": 30},
+            {"id": "b", "depends_on": ["a"], "estimated_minutes": 60},
+        ]
+        (plan_dir / "task_plan.json").write_text(json.dumps({"tasks": tasks}))
+        exp_dir = tmp_path / "exp"
+        exp_dir.mkdir()
+        (exp_dir / "gpu_progress.json").write_text(json.dumps({
+            "completed": ["a"], "failed": [],
+            "timings": {
+                "a": {"planned_min": 30, "actual_min": 21}
+            }
+        }))
+
+        info = get_batch_info(tmp_path, [0])
+        assert info["calibration_ratio"] == 0.7
+        assert info["calibrated"] is True
+        # b estimated 60 * 0.7 = 42
+        assert info["estimated_minutes"] == 42

@@ -583,9 +583,12 @@ class FarsOrchestrator:
         gpu_summary = ", ".join(
             f"{a['task_ids'][0]}→GPU{a['gpu_ids']}" for a in batch
         )
+        calibrated = info.get("calibrated", False)
+        ratio = info.get("calibration_ratio", 1.0)
+        cal_hint = f" (校准×{ratio})" if calibrated else ""
         desc = (
             f"{progress_str} 并行 {len(skills)} 任务 ({mode}), "
-            f"预计 {est_min}min: {gpu_summary}"
+            f"预计 {est_min}min{cal_hint}: {gpu_summary}"
         )
 
         action_type = "skills_parallel" if len(skills) > 1 else "skill"

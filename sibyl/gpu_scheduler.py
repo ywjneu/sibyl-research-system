@@ -126,15 +126,53 @@ def assign_gpus(ready_tasks: list[dict], gpu_ids: list[int],
     return assignments
 
 
+def _compute_calibration_ratio(timings: dict) -> float:
+    """Compute calibration ratio from historical task timings.
+
+    Ratio = median(actual / planned) across completed tasks.
+    Returns 1.0 if no valid timing data.
+
+    A ratio < 1.0 means tasks finish faster than planned.
+    A ratio > 1.0 means tasks take longer than planned.
+    """
+    ratios = []
+    for timing in timings.values():
+        planned = timing.get("planned_min", 0)
+        actual = timing.get("actual_min", 0)
+        if planned > 0 and actual > 0:
+            ratios.append(actual / planned)
+    if not ratios:
+        return 1.0
+    ratios.sort()
+    n = len(ratios)
+    if n % 2 == 0:
+        return (ratios[n // 2 - 1] + ratios[n // 2]) / 2.0
+    return ratios[n // 2]
+
+
 def estimate_batch_minutes(batch: list[dict], tasks: list[dict],
-                           default_minutes: int = 10) -> int:
-    """Estimate how long a batch will take (max of task estimates).
+                           default_minutes: int = 10,
+                           timings: dict | None = None) -> int:
+    """Estimate how long a batch will take (max of calibrated task estimates).
 
     Each task can declare estimated_minutes. The batch duration is the max
     across all tasks (since they run in parallel).
+
+    If timings dict is provided (from gpu_progress.json), calibrates estimates
+    using the median actual/planned ratio from previously completed tasks.
+    For example, if past tasks consistently finished in 70% of estimated time,
+    the ratio is 0.7 and future estimates are scaled down accordingly.
+
+    Args:
+        batch: List of task-GPU assignments
+        tasks: Full task list from task_plan.json
+        default_minutes: Fallback estimate when task has no estimate
+        timings: Optional dict of {task_id: {planned_min, actual_min}} from completed tasks
     """
     if not batch:
         return default_minutes
+
+    ratio = _compute_calibration_ratio(timings or {})
 
     task_map = {t["id"]: t for t in tasks}
     max_est = default_minutes
@@ -142,7 +180,12 @@ def estimate_batch_minutes(batch: list[dict], tasks: list[dict],
     for assignment in batch:
         for tid in assignment["task_ids"]:
             task = task_map.get(tid, {})
-            est = task.get("estimated_minutes", default_minutes)
+            # Use task-specific actual timing if available (re-run scenario)
+            if timings and tid in timings and timings[tid].get("actual_min", 0) > 0:
+                est = timings[tid]["actual_min"]
+            else:
+                est = task.get("estimated_minutes", default_minutes)
+                est = max(1, int(est * ratio))  # calibrate with historical ratio
             if est > max_est:
                 max_est = est
 
@@ -235,11 +278,13 @@ def get_batch_info(workspace_root: Path, gpu_ids: list[int], mode: str = "PILOT"
 
     progress_path = workspace_root / "exp" / "gpu_progress.json"
     completed = set()
+    timings = {}
     if progress_path.exists():
         try:
             with open(progress_path, encoding="utf-8") as f:
                 progress = json.load(f)
             completed = set(progress.get("completed", []))
+            timings = progress.get("timings", {})
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -257,13 +302,21 @@ def get_batch_info(workspace_root: Path, gpu_ids: list[int], mode: str = "PILOT"
                 "remaining_count": len(remaining), "total_count": len(tasks)}
 
     batch = assign_gpus(ready, gpu_ids, gpus_per_task)
-    est = estimate_batch_minutes(batch, tasks)
+    est = estimate_batch_minutes(batch, tasks, timings=timings)
+
+    # Compute calibration info for description
+    ratio = _compute_calibration_ratio(timings)
+    calibrated = len(timings) > 0 and any(
+        t.get("actual_min", 0) > 0 for t in timings.values()
+    )
 
     return {
         "batch": batch,
         "estimated_minutes": est,
         "remaining_count": len(remaining),
         "total_count": len(tasks),
+        "calibration_ratio": round(ratio, 2),
+        "calibrated": calibrated,
     }
 
 
