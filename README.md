@@ -41,7 +41,7 @@ graph LR
     end
 
     subgraph review["🔬 审稿反思"]
-        direction TB
+        direction LR
         rev["👥 综合审稿<br/><sub>Critic+Supervisor+Codex</sub>"]
         rev --> reflect["💭 反思总结"]
         reflect --> lark["☁️ 飞书同步"]
