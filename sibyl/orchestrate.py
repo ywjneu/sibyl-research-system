@@ -678,12 +678,22 @@ class FarsOrchestrator:
             marker_file=marker,
         )
 
+        # SSH MCP check command: returns task_id:DONE/PENDING per line
+        done_checks = " && ".join(
+            f'test -f {remote_dir}/exp/results/{tid}_DONE && echo "{tid}:DONE" || echo "{tid}:PENDING"'
+            for tid in task_ids
+        )
+
         return {
             "script": script,
             "marker_file": marker,
             "task_ids": task_ids,
             "timeout_minutes": timeout_min,
             "poll_interval_sec": poll_sec,
+            # SSH MCP polling fields
+            "ssh_connection": "default",
+            "check_cmd": done_checks,
+            "remote_dir": remote_dir,
         }
 
     def _gpu_poll_action(self, stage: str) -> Action:

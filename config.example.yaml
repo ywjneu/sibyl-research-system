@@ -1,32 +1,8 @@
 # Sibyl System Configuration
+# Copy to workspaces/<project>/config.yaml and customize
+# Full reference: docs/configuration.md
 
 workspaces_dir: workspaces
-
-# Agent-specific settings
-ideation:
-  model: claude-sonnet-4-20250514
-  max_tokens: 8192
-  temperature: 0.9  # higher creativity for ideation
-
-planning:
-  model: claude-sonnet-4-20250514
-  max_tokens: 8192
-  temperature: 0.7
-
-experiment:
-  model: claude-sonnet-4-20250514
-  max_tokens: 8192
-  temperature: 0.3  # low temperature for precise code generation
-
-writing:
-  model: claude-sonnet-4-20250514
-  max_tokens: 8192
-  temperature: 0.5
-
-# Pipeline settings
-max_parallel_tasks: 4
-experiment_timeout: 300  # seconds per experiment script
-review_enabled: true
 
 # GPU server (REQUIRED: set these to your actual server)
 ssh_server: "gpu-server"           # SSH host name from ~/.ssh/config
@@ -34,3 +10,40 @@ remote_base: "/home/user/sibyl_system"  # base dir on remote server
 max_gpus: 4
 remote_env_type: "conda"           # "conda" or "venv"
 # remote_conda_path: ""            # empty = auto {remote_base}/miniconda3/bin/conda
+
+# GPU polling (for shared servers)
+gpu_poll_enabled: true
+gpu_free_threshold_mb: 2000
+gpu_poll_interval_sec: 600         # 10 minutes
+# gpu_aggressive_mode: true
+# gpu_aggressive_threshold_pct: 25
+
+# Writing mode: sequential | parallel | codex
+writing_mode: parallel
+
+# Experiment mode: ssh_mcp | server_codex | server_claude
+experiment_mode: ssh_mcp
+
+# Codex independent review
+codex_enabled: true
+
+# Feishu/Lark sync
+lark_enabled: true
+
+# Iteration control
+idea_exp_cycles: 6         # max PIVOT count
+writing_revision_rounds: 2 # max writing revision rounds
+debate_rounds: 2           # debate rounds
+
+# Experiment settings
+# experiment_timeout: 300  # seconds per experiment script
+# pilot_samples: 16
+# pilot_timeout: 600
+# pilot_seeds: [42]
+# full_seeds: [42, 123, 456]
+
+# Agent-specific settings (optional overrides)
+# ideation:
+#   model: claude-opus-4-6
+#   max_tokens: 64000
+#   temperature: 0.9

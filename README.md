@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> An open-source alternative to [The AI Scientist](https://github.com/SakanaAI/AI-Scientist) and [AutoResearch](https://github.com/karpathy/autoresearch), built natively on [Claude Code](https://docs.anthropic.com/en/docs/claude-code) to fully leverage its agent ecosystem — skills, plugins, MCP servers, and multi-agent teams.
+> Inspired by the pioneering work of [The AI Scientist](https://github.com/SakanaAI/AI-Scientist), [FARS](https://analemma.ai/blog/introducing-fars/), and [AutoResearch](https://github.com/karpathy/autoresearch), Sibyl takes the vision further by building natively on [Claude Code](https://docs.anthropic.com/en/docs/claude-code) to fully leverage its agent ecosystem — skills, plugins, MCP servers, and multi-agent teams.
 
 [中文文档](README_CN.md)
 
@@ -201,90 +201,69 @@ workspaces/<project>/
 
 ## Quick Start
 
-### Requirements
+### Prerequisites
 
-- Python 3.12+
+- Python 3.12+, Node.js 18+
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
-- GPU server (SSH accessible, for experiment execution)
-- (Optional) [OpenAI Codex CLI](https://github.com/openai/codex) for Codex cross-review
-- (Optional) Feishu/Lark MCP Server for cloud doc sync
+- GPU server (SSH accessible)
+- `ANTHROPIC_API_KEY` environment variable
+- `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` environment variable
 
-### Installation
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/lose4578/sibyl-system.git
-cd sibyl-system
-
-# 2. Create Python virtual environment
-python3.12 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-
-# 3. Configure your GPU server (copy and edit)
-cp config.example.yaml workspaces/<your-project>/config.yaml
-# Edit: ssh_server, remote_base, max_gpus
-```
-
-### Load Plugin
-
-Sibyl is provided as a **Claude Code Plugin** with interactive commands:
+### Install & Run
 
 ```bash
-# Option 1: Specify plugin dir at startup (recommended for first try)
-claude --plugin-dir /path/to/sibyl-system/plugin
+git clone https://github.com/Sibyl-Research/sibyl-research-system.git
+cd sibyl-research-system
+chmod +x setup.sh && ./setup.sh
 
-# Option 2: Persist in Claude Code settings
-# Edit ~/.claude/settings.json:
-{
-  "pluginDirs": ["/path/to/sibyl-system/plugin"]
-}
+# Load plugin
+claude --plugin-dir ./plugin
+
+# In Claude Code:
+/sibyl-research:init              # Create a research project
+/sibyl-research:start <project>   # Start autonomous loop
 ```
 
-> **Note**: Replace `/path/to/sibyl-system` with your actual local path.
+See **[Getting Started Guide](docs/getting-started.md)** for the full walkthrough.
 
-### Usage
+## Documentation
 
-Operate via plugin commands in Claude Code:
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/getting-started.md) | Full installation and first-run guide |
+| [Configuration](docs/configuration.md) | All 35+ config options reference |
+| [MCP Servers](docs/mcp-servers.md) | Third-party MCP dependencies & setup |
+| [SSH & GPU Setup](docs/ssh-gpu-setup.md) | GPU server configuration |
+| [Plugin Commands](docs/plugin-commands.md) | All 12 plugin commands reference |
+| [Codex Integration](docs/codex-integration.md) | GPT-5.4 cross-review setup |
+| [Feishu/Lark Setup](docs/feishu-lark-setup.md) | Cloud document sync |
+| [Architecture](docs/architecture.md) | System internals for contributors |
 
-```bash
-/sibyl-research:init       # Interactive init: generate spec.md
-/sibyl-research:start      # Start research (enters autonomous loop)
-/sibyl-research:status     # View all project status
-/sibyl-research:continue   # Resume existing project
-/sibyl-research:debug      # Single-step mode (manually advance each stage)
-/sibyl-research:pivot      # Force switch research direction
-/sibyl-research:stop       # Stop research and close loop
-/sibyl-research:sync       # Manual sync to Feishu/Lark
-/sibyl-research:evolve     # Cross-project evolution analysis
-```
+## Third-Party Dependencies
 
-### Configuration
+### MCP Servers
 
-Create `workspaces/<project>/config.yaml` to override defaults (see [config.example.yaml](config.example.yaml)):
+| Server | Required | Purpose | Source |
+|--------|----------|---------|--------|
+| SSH MCP | Yes | Remote GPU execution | Claude Code built-in |
+| arXiv MCP | Yes | Paper search | `pip install arxiv-mcp-server` |
+| Google Scholar MCP | Recommended | Citation search | Community |
+| Codex MCP | Optional | GPT-5.4 review | [OpenAI Codex CLI](https://github.com/openai/codex) |
+| Lark MCP | Optional | Feishu Bitable/IM | `@larksuiteoapi/lark-mcp` |
+| Feishu MCP | Optional | Feishu documents | Community |
+| bioRxiv MCP | Optional | Biology preprints | Community |
 
-```yaml
-# GPU server
-ssh_server: "your-gpu-server"
-remote_base: "/home/you/sibyl_system"
-max_gpus: 4
+See **[MCP Servers Guide](docs/mcp-servers.md)** for installation and `~/.mcp.json` configuration.
 
-# Writing mode: sequential | parallel | codex
-writing_mode: parallel
+### Python Dependencies
 
-# Experiment mode: ssh_mcp | server_codex | server_claude
-experiment_mode: ssh_mcp
+- **PyYAML** >= 6.0 — Config file parsing
+- **rich** >= 13.0 — Terminal formatted output
 
-# Codex independent review
-codex_enabled: true
+### Optional Tools
 
-# Feishu/Lark sync
-lark_enabled: true
-
-# Iteration control
-idea_exp_cycles: 6         # max PIVOT count
-writing_revision_rounds: 2 # max writing revision rounds
-debate_rounds: 2           # debate rounds
-```
+- [OpenAI Codex CLI](https://github.com/openai/codex) — Independent cross-review (`codex_enabled: true`)
+- [Ralph Loop](https://github.com/anthropics/claude-code) — Autonomous iteration loop (Claude Code plugin)
 
 ## Key Mechanisms
 
@@ -309,8 +288,8 @@ The system automatically extracts lessons from each iteration, tracks effectiven
 
 1. **Record**: After each reflection, classify issues (7 categories) and success patterns
 2. **Analyze**: Aggregate frequency with time decay (30-day half-life)
-3. **Evaluate**: Compare early vs late scores, mark lesson effectiveness (requires ≥4 occurrences)
-4. **Apply**: Generate agent-specific prompt overlays; ineffective lessons deprioritized (×0.3)
+3. **Evaluate**: Compare early vs late scores, mark lesson effectiveness (requires >= 4 occurrences)
+4. **Apply**: Generate agent-specific prompt overlays; ineffective lessons deprioritized (x0.3)
 5. **Self-Check**: Detect quality decline, recurring errors, and ineffective lesson accumulation
 
 ### PIVOT Mechanism
@@ -334,11 +313,6 @@ When experiment results are unsatisfactory, the supervisor decision agent can tr
 | Self-evolution | Cross-project lesson learning | None | None |
 | Quality control | Multi-round review + quality gate | Automated review | Metric-based |
 | Human intervention | Fully autonomous | Minimal | Minimal |
-
-## Dependencies
-
-- **PyYAML** ≥ 6.0 — Config file parsing
-- **rich** ≥ 13.0 — Terminal formatted output
 
 ## License
 

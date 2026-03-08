@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> 一个 [The AI Scientist](https://github.com/SakanaAI/AI-Scientist) 和 [AutoResearch](https://github.com/karpathy/autoresearch) 的开源替代方案。原生构建于 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 之上，充分利用其 Agent 生态——Skills、Plugins、MCP Servers 和多 Agent 团队。
+> 受 [The AI Scientist](https://github.com/SakanaAI/AI-Scientist)、[FARS](https://analemma.ai/blog/introducing-fars/) 和 [AutoResearch](https://github.com/karpathy/autoresearch) 等先驱工作的启发，Sibyl 在此基础上更进一步，原生构建于 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 之上，充分利用其 Agent 生态——Skills、Plugins、MCP Servers 和多 Agent 团队。
 
 [English](README.md)
 
@@ -203,88 +203,67 @@ workspaces/<project>/
 
 ### 环境要求
 
-- Python 3.12+
+- Python 3.12+、Node.js 18+
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
-- GPU 服务器（SSH 可达，用于实验执行）
-- （可选）[OpenAI Codex CLI](https://github.com/openai/codex)，用于 Codex 交叉审查
-- （可选）飞书 MCP Server，用于云文档同步
+- GPU 服务器（SSH 可达）
+- `ANTHROPIC_API_KEY` 环境变量
+- `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 环境变量
 
-### 安装
-
-```bash
-# 1. 克隆仓库
-git clone https://github.com/lose4578/sibyl-system.git
-cd sibyl-system
-
-# 2. 创建 Python 虚拟环境
-python3.12 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-
-# 3. 配置 GPU 服务器（复制并编辑）
-cp config.example.yaml workspaces/<your-project>/config.yaml
-# 编辑: ssh_server, remote_base, max_gpus
-```
-
-### 加载插件
-
-Sibyl 以 **Claude Code Plugin** 形式提供，支持交互式命令：
+### 安装与运行
 
 ```bash
-# 方式一：启动时指定插件目录（推荐首次尝试）
-claude --plugin-dir /path/to/sibyl-system/plugin
+git clone https://github.com/Sibyl-Research/sibyl-research-system.git
+cd sibyl-research-system
+chmod +x setup.sh && ./setup.sh
 
-# 方式二：写入 Claude Code 配置持久化
-# 编辑 ~/.claude/settings.json:
-{
-  "pluginDirs": ["/path/to/sibyl-system/plugin"]
-}
+# 加载插件
+claude --plugin-dir ./plugin
+
+# 在 Claude Code 中:
+/sibyl-research:init              # 创建研究项目
+/sibyl-research:start <project>   # 启动自主循环
 ```
 
-> **注意**：将 `/path/to/sibyl-system` 替换为你的实际本地路径。
+完整安装指南见 **[快速上手](docs/getting-started.md)**。
 
-### 使用方法
+## 文档
 
-在 Claude Code 中通过插件命令操作：
+| 文档 | 说明 |
+|------|------|
+| [快速上手](docs/getting-started.md) | 完整安装与首次运行指南 |
+| [配置参考](docs/configuration.md) | 全部 35+ 配置项参考 |
+| [MCP 服务](docs/mcp-servers.md) | 第三方 MCP 依赖安装与配置 |
+| [SSH 与 GPU 配置](docs/ssh-gpu-setup.md) | GPU 服务器环境配置 |
+| [插件命令](docs/plugin-commands.md) | 全部 12 个插件命令参考 |
+| [Codex 集成](docs/codex-integration.md) | GPT-5.4 交叉审查配置 |
+| [飞书同步](docs/feishu-lark-setup.md) | 飞书云文档同步配置 |
+| [系统架构](docs/architecture.md) | 系统内部实现（贡献者参考） |
 
-```bash
-/sibyl-research:init       # 交互式初始化：生成 spec.md
-/sibyl-research:start      # 启动研究（进入自主循环）
-/sibyl-research:status     # 查看所有项目状态
-/sibyl-research:continue   # 恢复已有项目
-/sibyl-research:debug      # 单步模式（手动推进每个阶段）
-/sibyl-research:pivot      # 强制切换研究方向
-/sibyl-research:stop       # 停止研究并关闭循环
-/sibyl-research:sync       # 手动同步到飞书
-/sibyl-research:evolve     # 跨项目进化分析
-```
+## 第三方依赖
 
-### 配置
+### MCP 服务
 
-创建 `workspaces/<project>/config.yaml` 覆盖默认配置（参考 [config.example.yaml](config.example.yaml)）：
+| 服务 | 必需 | 用途 | 来源 |
+|------|------|------|------|
+| SSH MCP | 是 | 远程 GPU 执行 | Claude Code 内置 |
+| arXiv MCP | 是 | 论文搜索 | `pip install arxiv-mcp-server` |
+| Google Scholar MCP | 推荐 | 学术引用搜索 | 社区实现 |
+| Codex MCP | 可选 | GPT-5.4 审查 | [OpenAI Codex CLI](https://github.com/openai/codex) |
+| Lark MCP | 可选 | 飞书 Bitable/IM | `@larksuiteoapi/lark-mcp` |
+| Feishu MCP | 可选 | 飞书文档操作 | 社区实现 |
+| bioRxiv MCP | 可选 | 生物预印本 | 社区实现 |
 
-```yaml
-# GPU 服务器
-ssh_server: "your-gpu-server"
-remote_base: "/home/you/sibyl_system"
-max_gpus: 4
+完整安装与 `~/.mcp.json` 配置见 **[MCP 服务指南](docs/mcp-servers.md)**。
 
-# 写作模式: sequential | parallel | codex
-writing_mode: parallel
+### Python 依赖
 
-# 实验模式: ssh_mcp | server_codex | server_claude
-experiment_mode: ssh_mcp
+- **PyYAML** >= 6.0 — 配置文件解析
+- **rich** >= 13.0 — 终端格式化输出
 
-# Codex 独立审查
-codex_enabled: true
+### 可选工具
 
-# 飞书同步
-lark_enabled: true
-
-# 迭代控制
-idea_exp_cycles: 6         # 最大 PIVOT 次数
-writing_revision_rounds: 2 # 最大写作修改轮数
-debate_rounds: 2           # 辩论轮数
-```
+- [OpenAI Codex CLI](https://github.com/openai/codex) — 独立交叉审查（`codex_enabled: true`）
+- [Ralph Loop](https://github.com/anthropics/claude-code) — 自主迭代循环（Claude Code 插件）
 
 ## 核心机制
 
@@ -309,8 +288,8 @@ debate_rounds: 2           # 辩论轮数
 
 1. **记录**：每次反思后，分类问题（7 大类）和成功模式
 2. **分析**：时间衰减加权聚合频率（30 天半衰期）
-3. **评估**：对比早期和后期分数，标记经验有效性（需 ≥4 次出现）
-4. **应用**：生成 Agent 专属的 Prompt 叠加层；无效经验降权（×0.3）
+3. **评估**：对比早期和后期分数，标记经验有效性（需 >= 4 次出现）
+4. **应用**：生成 Agent 专属的 Prompt 叠加层；无效经验降权（x0.3）
 5. **自检**：检测质量下降、反复系统错误和无效经验堆积
 
 ### PIVOT 机制
@@ -334,11 +313,6 @@ debate_rounds: 2           # 辩论轮数
 | 自我进化 | 跨项目经验学习 | 无 | 无 |
 | 质量控制 | 多轮审查 + 质量门控 | 自动审查 | 基于指标 |
 | 人工干预 | 全自主 | 极少 | 极少 |
-
-## 依赖
-
-- **PyYAML** ≥ 6.0 — 配置文件解析
-- **rich** ≥ 13.0 — 终端格式化输出
 
 ## 许可证
 
