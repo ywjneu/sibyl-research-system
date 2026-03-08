@@ -1,15 +1,19 @@
-# Sibyl System (西比拉系统)
+# Sibyl System
 
-**Fully Autonomous AI Research System with Self-Evolution | 自主进化的全自动 AI 科研系统**
+**Fully Autonomous AI Research System with Self-Evolution**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > An open-source alternative to [The AI Scientist](https://github.com/SakanaAI/AI-Scientist) and [AutoResearch](https://github.com/karpathy/autoresearch), built natively on [Claude Code](https://docs.anthropic.com/en/docs/claude-code) to fully leverage its agent ecosystem — skills, plugins, MCP servers, and multi-agent teams.
 
+[中文文档](README_CN.md)
+
 Sibyl is a **fully automated scientific discovery system** that autonomously drives ML research from literature survey to paper submission — and **evolves itself** by learning from every iteration. Unlike systems that merely assist human researchers, Sibyl operates as an **autonomous research organization**: 20+ specialized AI agents debate ideas, design and run GPU experiments, write papers, and critically review their own work, all without human intervention.
 
-### What makes Sibyl different?
+### What Makes Sibyl Different?
 
 - **Claude Code Native** — Not a wrapper around API calls. Built directly on Claude Code's architecture (fork skills, agent teams, MCP tools), inheriting its full ecosystem: SSH remote execution, Playwright browser automation, Feishu/Lark cloud sync, and more.
-- **Self-Evolving** — The system learns from its own research iterations. It classifies issues, tracks lesson effectiveness, deprioritizes ineffective strategies, and automatically injects proven improvements into agent prompts. Each project makes the system smarter.
+- **Self-Evolving** — The system learns from its own research iterations. It classifies issues, tracks lesson effectiveness, deprioritizes what doesn't work, and automatically injects proven improvements into agent prompts. Each project makes the system smarter.
 - **Fully Autonomous Loop** — Start a research topic, walk away. Sibyl handles literature search, multi-perspective idea debate, experiment planning, GPU-parallel execution, result analysis, paper writing, peer-level review, and quality-gated iteration — looping until the research meets publication standards.
 
 ---
@@ -78,14 +82,14 @@ Sibyl orchestrates 20+ AI agents through a **19-stage state-machine pipeline**, 
 | Stage | Description | Agent Mode |
 |-------|-------------|-----------|
 | `literature_search` | Dual-source survey via arXiv + Web | Single Agent |
-| `idea_debate` | 6-perspective idea debate (Innovator/Pragmatist/Theorist/Contrarian/Interdisciplinary/Empiricist) | 6-Agent Team |
+| `idea_debate` | 6-perspective idea debate (Innovator / Pragmatist / Theorist / Contrarian / Interdisciplinary / Empiricist) | 6-Agent Team |
 | `planning` | Design experiments, generate task_plan.json with dependencies | Single Agent |
 | `pilot_experiments` | Small-scale feasibility validation | Single Agent |
 | `experiment_cycle` | GPU-parallel full experiments, topologically sorted batch scheduling | Single Agent + GPU Scheduler |
-| `result_debate` | 6-perspective result analysis (Optimist/Skeptic/Strategist/Methodologist/Comparativist/Revisionist) | 6-Agent Team |
+| `result_debate` | 6-perspective result analysis (Optimist / Skeptic / Strategist / Methodologist / Comparativist / Revisionist) | 6-Agent Team |
 | `experiment_decision` | Supervisor decision: PIVOT (change direction) or PROCEED | Single Agent |
 | `writing_outline` | Generate paper outline | Single Agent |
-| `writing_sections` | Write by section (sequential/parallel/Codex modes) | Configurable |
+| `writing_sections` | Write by section (sequential / parallel / Codex modes) | Configurable |
 | `writing_critique` | 6-agent cross-review of each section | 6-Agent Parallel |
 | `writing_integrate` | Editor integrates into complete paper | Single Agent |
 | `writing_final_review` | NeurIPS/ICML-level final review (can loop for revision) | Single Agent |
@@ -93,11 +97,11 @@ Sibyl orchestrates 20+ AI agents through a **19-stage state-machine pipeline**, 
 | `review` | Critic + Supervisor + Codex parallel review | Parallel Skills |
 | `reflection` | Classify issues, generate improvement plan, record lessons | Single Agent |
 | `lark_sync` | Sync research data to Feishu/Lark cloud docs | Single Agent |
-| `quality_gate` | Evaluate if done (≥8.0 score and ≥2 iterations) | Automatic |
+| `quality_gate` | Evaluate completion (≥8.0 score and ≥2 iterations) | Automatic |
 
 ## Agent Roles
 
-### Idea Generation Team (Idea Debate)
+### Idea Generation Team
 
 | Agent | Perspective | Responsibility |
 |-------|------------|----------------|
@@ -108,7 +112,7 @@ Sibyl orchestrates 20+ AI agents through a **19-stage state-machine pipeline**, 
 | Interdisciplinary | Analogical inspiration | Import methods from cognitive science, physics, biology |
 | Empiricist | Experiment-first | Focus on reproducibility and data quality |
 
-### Result Analysis Team (Result Debate)
+### Result Analysis Team
 
 | Agent | Perspective | Responsibility |
 |-------|------------|----------------|
@@ -119,7 +123,7 @@ Sibyl orchestrates 20+ AI agents through a **19-stage state-machine pipeline**, 
 | Comparativist | SOTA benchmarking | Compare and position against existing best methods |
 | Revisionist | Hypothesis revision | Reflect on and adjust hypotheses based on results |
 
-### Agent Model Tiers
+### Model Tiers
 
 | Tier | Model | Usage |
 |------|-------|-------|
@@ -173,7 +177,7 @@ sibyl-system/
 │   └── skills/sibyl-*/         # 30+ Fork Skills (isolated context execution)
 ├── plugin/commands/            # Claude Code plugin commands
 ├── workspaces/                 # Research project workspaces
-├── tests/                      # Unit tests
+├── tests/                      # Unit tests (~320 tests)
 └── requirements.txt            # Dependencies (PyYAML, rich)
 ```
 
@@ -254,22 +258,9 @@ Operate via plugin commands in Claude Code:
 /sibyl-research:evolve     # Cross-project evolution analysis
 ```
 
-### SSH Server Configuration
-
-Experiment execution requires SSH connection to a GPU server. Configure [SSH MCP Server](https://github.com/anthropics/claude-code):
-
-1. Ensure `~/.ssh/config` has your target server (e.g., `Host gpu-server`)
-2. Set in your project's `config.yaml`:
-
-```yaml
-ssh_server: "your-gpu-server"
-remote_base: "/path/to/remote/workspace"
-max_gpus: 4
-```
-
 ### Configuration
 
-Create `workspaces/<project>/config.yaml` to override defaults:
+Create `workspaces/<project>/config.yaml` to override defaults (see [config.example.yaml](config.example.yaml)):
 
 ```yaml
 # GPU server
