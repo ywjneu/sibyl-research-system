@@ -88,8 +88,19 @@ echo "EXPERIMENT_DONE"
 
 当参数包含 `--tasks=task_1a,task_1b` 时：
 - 只执行指定的任务（不是 task_plan.json 中的全部任务）
-- 只使用分配的 GPU ID（通过 `CUDA_VISIBLE_DEVICES` 传递）
-- 完成后更新 `{workspace}/exp/gpu_progress.json`：
+- 只使用分配的 GPU ID（通过 GPU IDs 参数传递）
+- 设置 `CUDA_VISIBLE_DEVICES` 为分配的 GPU ID
+- 一个任务可能分配多张 GPU（如 "0,1" 表示 2 张 GPU）
+  — 服务器端 agent 的 prompt 中应要求使用 `DataParallel` 或 `DDP`
+
+### 长时间训练的超时处理
+task_plan.json 中每个任务可声明 `estimated_minutes`。服务器端 CLI 启动时设置超时为
+`estimated_minutes * 2`（最低 10 分钟）。对于训练时间 >30 分钟的任务，在实验 prompt
+中要求服务器端 agent 定期输出进度（每 5 分钟打印 loss/epoch），并在训练完成时写入
+完成标记文件 `DONE`。
+
+### 进度跟踪
+完成后更新 `{workspace}/exp/gpu_progress.json`：
   1. 读取现有文件（或创建 `{"completed": [], "failed": []}`）
   2. 将完成的 task ID 追加到 `completed` 数组
   3. 将失败的 task ID 追加到 `failed` 数组

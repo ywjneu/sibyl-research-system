@@ -69,6 +69,7 @@ class Action:
     bash_command: str | None = None  # for bash actions
     description: str = ""
     stage: str = ""
+    estimated_minutes: int = 0  # expected runtime hint for experiment batches
 
 
 class FarsOrchestrator:
@@ -385,26 +386,39 @@ class FarsOrchestrator:
         If task_plan.json exists and has a tasks array, uses gpu_scheduler
         to assign GPU subsets to parallel tasks. Otherwise falls back to
         single-agent mode with all GPUs.
-        """
-        from sibyl.gpu_scheduler import get_next_batch
 
-        batch = get_next_batch(
+        Each task can declare:
+          - gpu_count: how many GPUs it needs (default: config.gpus_per_task)
+          - estimated_minutes: expected runtime (default: 10)
+
+        The action includes estimated_minutes so the executor can set
+        appropriate SSH timeouts and polling intervals.
+        """
+        from sibyl.gpu_scheduler import get_batch_info
+
+        info = get_batch_info(
             self.ws.root, self.config.gpu_ids, mode,
             gpus_per_task=self.config.gpus_per_task,
         )
 
         # No task_plan or all tasks complete → single-agent fallback
-        if batch is None:
+        if info is None:
             return self._experiment_skill(mode, ws, self.config.gpu_ids, stage)
+
+        batch = info["batch"]
 
         # All tasks blocked by deps (shouldn't happen with valid DAG)
         if len(batch) == 0:
             return Action(
                 action_type="bash",
-                bash_command=f'echo "All experiment tasks blocked by dependencies"',
+                bash_command='echo "All experiment tasks blocked by dependencies"',
                 description="实验任务被依赖阻塞",
                 stage=stage,
             )
+
+        est_min = info["estimated_minutes"]
+        remaining = info["remaining_count"]
+        total = info["total_count"]
 
         # Build parallel skills, one per GPU assignment
         skills = []
@@ -415,18 +429,22 @@ class FarsOrchestrator:
                 self._experiment_skill_dict(mode, ws, gpu_ids, task_ids)
             )
 
-        if len(skills) == 1:
-            return Action(
-                action_type="skill",
-                skills=skills,
-                description=f"执行实验批次 ({mode}): {skills[0].get('args', '')[:60]}",
-                stage=stage,
-            )
+        progress_str = f"[{total - remaining}/{total}]"
+        gpu_summary = ", ".join(
+            f"{a['task_ids'][0]}→GPU{a['gpu_ids']}" for a in batch
+        )
+        desc = (
+            f"{progress_str} 并行 {len(skills)} 任务 ({mode}), "
+            f"预计 {est_min}min: {gpu_summary}"
+        )
+
+        action_type = "skills_parallel" if len(skills) > 1 else "skill"
         return Action(
-            action_type="skills_parallel",
+            action_type=action_type,
             skills=skills,
-            description=f"并行执行 {len(skills)} 个实验任务 ({mode})",
+            description=desc,
             stage=stage,
+            estimated_minutes=est_min,
         )
 
     def _experiment_skill_dict(self, mode: str, ws: str, gpu_ids: list[int],
@@ -816,13 +834,13 @@ class FarsOrchestrator:
 
         # experiment stages: loop if more batches remain
         if current_stage in ("pilot_experiments", "experiment_cycle"):
-            from sibyl.gpu_scheduler import get_next_batch
+            from sibyl.gpu_scheduler import get_batch_info
             exp_mode = "PILOT" if current_stage == "pilot_experiments" else "FULL"
-            batch = get_next_batch(
+            info = get_batch_info(
                 self.ws.root, self.config.gpu_ids, exp_mode,
                 gpus_per_task=self.config.gpus_per_task,
             )
-            if batch is not None and len(batch) > 0:
+            if info is not None and len(info["batch"]) > 0:
                 return (current_stage, None)  # stay in current stage for next batch
 
         # writing_final_review: low score loops back to writing_integrate (with round limit)

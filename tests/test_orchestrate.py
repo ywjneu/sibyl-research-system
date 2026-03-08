@@ -698,3 +698,36 @@ class TestExperimentParallel:
         assert action["action_type"] == "skills_parallel"
         # With 4 GPUs and 2 per task, should get 2 parallel tasks
         assert len(action["skills"]) == 2
+
+    def test_per_task_gpu_count(self, make_orchestrator):
+        """Tasks with per-task gpu_count override the default."""
+        o = make_orchestrator(stage="pilot_experiments")
+        tasks = [
+            {"id": "a", "depends_on": [], "gpu_count": 2},
+            {"id": "b", "depends_on": [], "gpu_count": 1},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+        action = o.get_next_action()
+        assert action["action_type"] == "skills_parallel"
+        assert len(action["skills"]) == 2
+        # Task a should get 2 GPUs, task b should get 1
+        assert "0,1" in action["skills"][0]["args"]
+        assert "2" in action["skills"][1]["args"]
+
+    def test_estimated_minutes_in_action(self, make_orchestrator):
+        """Action should include estimated_minutes from task plan."""
+        o = make_orchestrator(stage="pilot_experiments")
+        tasks = [
+            {"id": "a", "depends_on": [], "estimated_minutes": 30},
+            {"id": "b", "depends_on": [], "estimated_minutes": 90},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+        action = o.get_next_action()
+        assert action["estimated_minutes"] == 90  # max of batch
+        assert "90min" in action["description"]
+
+    def test_no_task_plan_zero_estimated_minutes(self, make_orchestrator):
+        """Without task_plan, estimated_minutes defaults to 0."""
+        o = make_orchestrator(stage="pilot_experiments")
+        action = o.get_next_action()
+        assert action["estimated_minutes"] == 0

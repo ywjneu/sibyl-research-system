@@ -4,7 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from sibyl.gpu_scheduler import topo_sort_layers, assign_gpus, get_next_batch
+from sibyl.gpu_scheduler import (
+    topo_sort_layers, assign_gpus, get_next_batch,
+    estimate_batch_minutes, get_batch_info,
+)
 
 
 # ══════════════════════════════════════════════
@@ -79,35 +82,103 @@ class TestTopoSortLayers:
 class TestAssignGpus:
     def test_basic_assignment(self):
         tasks = [{"id": "a"}, {"id": "b"}]
-        result = assign_gpus(tasks, [0, 1, 2, 3], gpus_per_task=1)
+        result = assign_gpus(tasks, [0, 1, 2, 3])
         assert len(result) == 2
         assert result[0]["task_ids"] == ["a"]
         assert result[0]["gpu_ids"] == [0]
         assert result[1]["task_ids"] == ["b"]
         assert result[1]["gpu_ids"] == [1]
 
-    def test_multi_gpu_per_task(self):
+    def test_per_task_gpu_count(self):
+        """Each task declares its own gpu_count."""
+        tasks = [
+            {"id": "a", "gpu_count": 2},
+            {"id": "b", "gpu_count": 1},
+        ]
+        result = assign_gpus(tasks, [0, 1, 2, 3])
+        assert len(result) == 2
+        assert result[0]["gpu_ids"] == [0, 1]  # task a gets 2 GPUs
+        assert result[1]["gpu_ids"] == [2]      # task b gets 1 GPU
+
+    def test_mixed_gpu_counts_exhaust(self):
+        """Tasks with different gpu_count, not enough GPUs for all."""
+        tasks = [
+            {"id": "a", "gpu_count": 2},
+            {"id": "b", "gpu_count": 2},
+            {"id": "c", "gpu_count": 1},
+        ]
+        result = assign_gpus(tasks, [0, 1, 2, 3])
+        assert len(result) == 2  # a=2, b=2, c can't fit
+        assert result[0]["gpu_ids"] == [0, 1]
+        assert result[1]["gpu_ids"] == [2, 3]
+
+    def test_default_gpus_per_task_fallback(self):
+        """Tasks without gpu_count use the default."""
         tasks = [{"id": "a"}, {"id": "b"}]
-        result = assign_gpus(tasks, [0, 1, 2, 3], gpus_per_task=2)
+        result = assign_gpus(tasks, [0, 1, 2, 3], default_gpus_per_task=2)
         assert len(result) == 2
         assert result[0]["gpu_ids"] == [0, 1]
         assert result[1]["gpu_ids"] == [2, 3]
 
+    def test_task_gpu_count_overrides_default(self):
+        """Per-task gpu_count takes precedence over default."""
+        tasks = [
+            {"id": "a", "gpu_count": 1},  # overrides default 2
+            {"id": "b"},                   # uses default 2
+        ]
+        result = assign_gpus(tasks, [0, 1, 2, 3], default_gpus_per_task=2)
+        assert len(result) == 2
+        assert result[0]["gpu_ids"] == [0]
+        assert result[1]["gpu_ids"] == [1, 2]
+
     def test_more_tasks_than_gpus(self):
         tasks = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
-        result = assign_gpus(tasks, [0, 1], gpus_per_task=1)
+        result = assign_gpus(tasks, [0, 1])
         assert len(result) == 2  # only 2 GPUs available
 
-    def test_insufficient_gpus(self):
-        """When gpus_per_task > total GPUs, give all GPUs to first task."""
-        tasks = [{"id": "a"}, {"id": "b"}]
-        result = assign_gpus(tasks, [0], gpus_per_task=2)
+    def test_task_needs_more_than_total_gpus(self):
+        """Task needs 4 GPUs but only 2 available → gets all GPUs."""
+        tasks = [{"id": "a", "gpu_count": 4}]
+        result = assign_gpus(tasks, [0, 1])
         assert len(result) == 1
-        assert result[0]["gpu_ids"] == [0]
+        assert result[0]["gpu_ids"] == [0, 1]
 
     def test_empty_inputs(self):
         assert assign_gpus([], [0, 1]) == []
         assert assign_gpus([{"id": "a"}], []) == []
+
+
+# ══════════════════════════════════════════════
+# Time estimation
+# ══════════════════════════════════════════════
+
+class TestEstimateBatchMinutes:
+    def test_default(self):
+        assert estimate_batch_minutes([], []) == 10
+
+    def test_uses_task_estimate(self):
+        tasks = [
+            {"id": "a", "estimated_minutes": 30},
+            {"id": "b", "estimated_minutes": 60},
+        ]
+        batch = [
+            {"task_ids": ["a"], "gpu_ids": [0]},
+            {"task_ids": ["b"], "gpu_ids": [1]},
+        ]
+        assert estimate_batch_minutes(batch, tasks) == 60  # max
+
+    def test_missing_estimate_uses_default(self):
+        tasks = [{"id": "a"}]
+        batch = [{"task_ids": ["a"], "gpu_ids": [0]}]
+        assert estimate_batch_minutes(batch, tasks, default_minutes=15) == 15
+
+    def test_single_long_task(self):
+        tasks = [
+            {"id": "a", "estimated_minutes": 120},
+            {"id": "b", "estimated_minutes": 5},
+        ]
+        batch = [{"task_ids": ["a"], "gpu_ids": [0]}]
+        assert estimate_batch_minutes(batch, tasks) == 120
 
 
 # ══════════════════════════════════════════════
@@ -192,23 +263,10 @@ class TestGetNextBatch:
         plan_dir.mkdir()
         tasks = [
             {"id": "a", "depends_on": []},
-            {"id": "b", "depends_on": ["a"]},
-        ]
-        (plan_dir / "task_plan.json").write_text(json.dumps({"tasks": tasks}))
-
-        # a is not yet complete but not in remaining ready either
-        # actually a IS ready (no deps), b is blocked on a
-        # Let's make a different scenario: only b remains, a not done
-        # Wait - if a is in the tasks list and not completed, it IS remaining
-        # and it has no deps so it IS ready. For blocked, we need all remaining
-        # to have unmet deps.
-        # Simpler: make "a" completed but "b" depends on "a" AND "c" which is not done
-        tasks2 = [
-            {"id": "a", "depends_on": []},
             {"id": "c", "depends_on": []},
             {"id": "b", "depends_on": ["a", "c"]},
         ]
-        (plan_dir / "task_plan.json").write_text(json.dumps({"tasks": tasks2}))
+        (plan_dir / "task_plan.json").write_text(json.dumps({"tasks": tasks}))
         exp_dir = tmp_path / "exp"
         exp_dir.mkdir(exist_ok=True)
         (exp_dir / "gpu_progress.json").write_text(json.dumps({
@@ -221,16 +279,17 @@ class TestGetNextBatch:
         assert len(result) == 1
         assert result[0]["task_ids"] == ["c"]
 
-    def test_gpus_per_task(self, tmp_path):
+    def test_per_task_gpu_count(self, tmp_path):
+        """Tasks with per-task gpu_count are respected."""
         plan_dir = tmp_path / "plan"
         plan_dir.mkdir()
         tasks = [
-            {"id": "a", "depends_on": []},
-            {"id": "b", "depends_on": []},
+            {"id": "a", "depends_on": [], "gpu_count": 2},
+            {"id": "b", "depends_on": [], "gpu_count": 2},
         ]
         (plan_dir / "task_plan.json").write_text(json.dumps({"tasks": tasks}))
 
-        result = get_next_batch(tmp_path, [0, 1, 2, 3], gpus_per_task=2)
+        result = get_next_batch(tmp_path, [0, 1, 2, 3])
         assert len(result) == 2
         assert result[0]["gpu_ids"] == [0, 1]
         assert result[1]["gpu_ids"] == [2, 3]
@@ -241,3 +300,75 @@ class TestGetNextBatch:
         (plan_dir / "task_plan.json").write_text("not valid json {{{")
         result = get_next_batch(tmp_path, [0, 1])
         assert result is None
+
+
+# ══════════════════════════════════════════════
+# Batch info (with timing metadata)
+# ══════════════════════════════════════════════
+
+class TestGetBatchInfo:
+    def test_no_task_plan(self, tmp_path):
+        assert get_batch_info(tmp_path, [0, 1]) is None
+
+    def test_returns_metadata(self, tmp_path):
+        plan_dir = tmp_path / "plan"
+        plan_dir.mkdir()
+        tasks = [
+            {"id": "a", "depends_on": [], "estimated_minutes": 30},
+            {"id": "b", "depends_on": [], "estimated_minutes": 60},
+            {"id": "c", "depends_on": ["a", "b"], "estimated_minutes": 15},
+        ]
+        (plan_dir / "task_plan.json").write_text(json.dumps({"tasks": tasks}))
+
+        info = get_batch_info(tmp_path, [0, 1, 2, 3])
+        assert info is not None
+        assert len(info["batch"]) == 2
+        assert info["estimated_minutes"] == 60  # max of a=30, b=60
+        assert info["remaining_count"] == 3
+        assert info["total_count"] == 3
+
+    def test_progress_updates_counts(self, tmp_path):
+        plan_dir = tmp_path / "plan"
+        plan_dir.mkdir()
+        tasks = [
+            {"id": "a", "depends_on": []},
+            {"id": "b", "depends_on": ["a"]},
+        ]
+        (plan_dir / "task_plan.json").write_text(json.dumps({"tasks": tasks}))
+        exp_dir = tmp_path / "exp"
+        exp_dir.mkdir()
+        (exp_dir / "gpu_progress.json").write_text(json.dumps({
+            "completed": ["a"], "failed": []
+        }))
+
+        info = get_batch_info(tmp_path, [0, 1])
+        assert info["remaining_count"] == 1
+        assert info["total_count"] == 2
+        assert len(info["batch"]) == 1
+
+    def test_all_complete_returns_none(self, tmp_path):
+        plan_dir = tmp_path / "plan"
+        plan_dir.mkdir()
+        tasks = [{"id": "a", "depends_on": []}]
+        (plan_dir / "task_plan.json").write_text(json.dumps({"tasks": tasks}))
+        exp_dir = tmp_path / "exp"
+        exp_dir.mkdir()
+        (exp_dir / "gpu_progress.json").write_text(json.dumps({
+            "completed": ["a"], "failed": []
+        }))
+
+        assert get_batch_info(tmp_path, [0, 1]) is None
+
+    def test_blocked_returns_empty_batch(self, tmp_path):
+        plan_dir = tmp_path / "plan"
+        plan_dir.mkdir()
+        tasks = [
+            {"id": "a", "depends_on": ["b"]},
+            {"id": "b", "depends_on": ["a"]},  # circular → both blocked
+        ]
+        (plan_dir / "task_plan.json").write_text(json.dumps({"tasks": tasks}))
+
+        info = get_batch_info(tmp_path, [0, 1])
+        assert info is not None
+        assert info["batch"] == []
+        assert info["remaining_count"] == 2

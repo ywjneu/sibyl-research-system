@@ -118,6 +118,10 @@ LOOP:
      "skills_parallel": 并行调用 action.skills 列表中的所有 skill。
        使用 Agent 工具并行启动多个 subagent，每个调用对应的 Skill。
        等待所有 subagent 完成后继续。
+       注意：实验阶段的 action 可能包含 estimated_minutes 字段，
+       表示预计运行时间（分钟）。如果 >0，各 subagent 应据此设置
+       SSH 超时和轮询间隔，避免过早超时或过度轮询浪费 token。
+       实验完成后，编排器会自动检查是否有剩余任务并循环执行下一批。
      "agents_parallel": 遗留格式（cross-critique 仍用此方式）。
        依次执行 action.agents 列表中的各 agent 任务。
      "team": 使用 Agent Team 进行多 agent 协作讨论。

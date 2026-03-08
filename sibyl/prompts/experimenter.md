@@ -61,8 +61,24 @@ ssh cs8000d "CUDA_VISIBLE_DEVICES={gpu_id} conda run -n sibyl_{project} python /
 
 When invoked with `--tasks=task_1a,task_1b`:
 - Only execute the specified tasks (not all tasks in task_plan.json)
-- Only use the assigned GPU IDs passed via `CUDA_VISIBLE_DEVICES`
-- After completing all assigned tasks, update `{workspace}/exp/gpu_progress.json`:
+- Only use the assigned GPU IDs passed via the GPU IDs argument
+- Set `CUDA_VISIBLE_DEVICES` to the assigned GPU IDs for each task
+- A task may have multiple GPUs assigned (e.g. GPU IDs "0,1" means 2 GPUs)
+  — use `torch.nn.DataParallel` or `DistributedDataParallel` as appropriate
+
+### SSH timeout for long-running tasks
+Each task in task_plan.json can declare `estimated_minutes`. Set SSH command
+timeout to `estimated_minutes * 2` (with a minimum of 10 minutes) to allow
+for variance. For long training jobs (>30 min), use `nohup` + periodic polling:
+```bash
+# Launch in background
+ssh cs8000d "cd /path && nohup bash run.sh > output.log 2>&1 &"
+# Poll every N minutes (check for completion marker)
+ssh cs8000d "test -f /path/DONE && cat /path/results.json"
+```
+
+### Progress tracking
+After completing all assigned tasks, update `{workspace}/exp/gpu_progress.json`:
   1. Read existing file (or create `{"completed": [], "failed": []}`)
   2. Append completed task IDs to `completed` array
   3. Append failed task IDs to `failed` array
