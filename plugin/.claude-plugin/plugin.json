@@ -1,0 +1,8 @@
+{
+  "name": "sibyl-research",
+  "description": "Sibyl System (西比拉系统) - 多 Agent 自动化研究系统，Claude Code 原生架构",
+  "version": "1.0.0",
+  "author": {
+    "name": "cwan0785"
+  }
+}

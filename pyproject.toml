@@ -1,0 +1,19 @@
+[project]
+name = "sibyl-system"
+version = "0.5.0"
+description = "Sibyl System - 西比拉自动化研究系统 (Claude Code Native)"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+    "rich>=13.0",
+]
+
+[project.scripts]
+sibyl = "sibyl.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sibyl"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

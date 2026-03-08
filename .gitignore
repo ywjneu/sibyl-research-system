@@ -1,0 +1,30 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+workspaces/
+.claude/
+
+# Legacy experiment artifacts (pre-v5)
+exp/
+logs/
+writing/
+
+# Sensitive / credentials
+user_token_cache.json
+*.secret
+.env
+.env.*
+
+# Playwright MCP logs
+.playwright-mcp/
+
+# Misc temp files
+.history/
+cli_pause
+暂停
+进入
+连续失败
+重试一次

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "sibyl-system",
+  "description": "Sibyl System (西比拉系统) local plugins",
+  "owner": {
+    "name": "cwan0785"
+  },
+  "plugins": [
+    {
+      "name": "sibyl-research",
+      "source": "./",
+      "description": "Sibyl System (西比拉系统) - 多 Agent 自动化研究系统，Claude Code 原生架构",
+      "version": "1.0.0",
+      "author": {
+        "name": "cwan0785"
+      }
+    }
+  ]
+}
