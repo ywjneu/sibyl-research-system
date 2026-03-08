@@ -28,6 +28,12 @@ class Config:
     ssh_server: str = "cs8000d"
     remote_base: str = "/home/ccwang/sibyl_system"
 
+    # GPU polling (for shared servers with other users)
+    gpu_poll_enabled: bool = True
+    gpu_free_threshold_mb: int = 2000  # GPU is "free" if memory < this
+    gpu_poll_interval_sec: int = 60    # seconds between polls
+    gpu_poll_max_attempts: int = 60    # max polls before timeout (60min)
+
     # Pilot experiments
     pilot_samples: int = 16
     pilot_timeout: int = 600  # 10 min
@@ -91,6 +97,8 @@ class Config:
         for key in [
             "max_parallel_tasks", "experiment_timeout", "review_enabled",
             "ssh_server", "remote_base", "gpus_per_task",
+            "gpu_poll_enabled", "gpu_free_threshold_mb",
+            "gpu_poll_interval_sec", "gpu_poll_max_attempts",
             "pilot_samples", "pilot_timeout",
             "debate_rounds", "writing_revision_rounds",
             "lark_enabled", "evolution_enabled",

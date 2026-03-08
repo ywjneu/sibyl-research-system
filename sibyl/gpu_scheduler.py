@@ -16,8 +16,14 @@ Task plan format:
             ...
         ]
     }
+
+GPU polling:
+    For shared servers, poll_free_gpus() checks nvidia-smi output to find
+    GPUs with memory usage below a threshold. The polling is designed to be
+    executed as a lightweight bash command (no LLM needed).
 """
 import json
+import re
 from collections import deque
 from pathlib import Path
 
@@ -259,3 +265,154 @@ def get_batch_info(workspace_root: Path, gpu_ids: list[int], mode: str = "PILOT"
         "remaining_count": len(remaining),
         "total_count": len(tasks),
     }
+
+
+# ---------------------------------------------------------------------------
+# GPU availability polling for shared servers
+# ---------------------------------------------------------------------------
+
+# Threshold: GPU is "free" if used memory is below this (MB)
+DEFAULT_FREE_THRESHOLD_MB = 2000
+
+
+def nvidia_smi_query_cmd() -> str:
+    """Return the nvidia-smi command to query GPU memory usage.
+
+    Output format: one line per GPU, "index, memory.used [MiB]"
+    Example: "0, 512 MiB"
+    """
+    return (
+        "nvidia-smi --query-gpu=index,memory.used "
+        "--format=csv,noheader,nounits"
+    )
+
+
+def parse_free_gpus(
+    nvidia_smi_output: str,
+    candidate_gpu_ids: list[int],
+    threshold_mb: int = DEFAULT_FREE_THRESHOLD_MB,
+) -> list[int]:
+    """Parse nvidia-smi CSV output and return GPU IDs below memory threshold.
+
+    Args:
+        nvidia_smi_output: Raw output from nvidia_smi_query_cmd()
+        candidate_gpu_ids: GPU IDs we're interested in (from config)
+        threshold_mb: Memory usage threshold in MB; GPUs below this are "free"
+
+    Returns:
+        Sorted list of free GPU IDs (subset of candidate_gpu_ids)
+    """
+    candidates = set(candidate_gpu_ids)
+    free = []
+    for line in nvidia_smi_output.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Format: "0, 512" or "0, 512 MiB" (nounits should strip MiB)
+        parts = re.split(r"[,\s]+", line)
+        if len(parts) < 2:
+            continue
+        try:
+            gpu_id = int(parts[0])
+            mem_used = int(float(parts[1]))
+        except (ValueError, IndexError):
+            continue
+        if gpu_id in candidates and mem_used < threshold_mb:
+            free.append(gpu_id)
+    return sorted(free)
+
+
+def gpu_poll_wait_script(
+    ssh_server: str,
+    candidate_gpu_ids: list[int],
+    threshold_mb: int = DEFAULT_FREE_THRESHOLD_MB,
+    poll_interval_sec: int = 60,
+    max_polls: int = 60,
+    marker_file: str = "/tmp/sibyl_gpu_free.json",
+) -> str:
+    """Generate a bash script that polls for free GPUs via SSH.
+
+    The script:
+    1. Runs nvidia-smi on the remote server every poll_interval_sec seconds
+    2. Checks if any candidate GPU has memory below threshold
+    3. When free GPUs are found, writes them to marker_file and exits 0
+    4. After max_polls attempts, exits 1 (timeout)
+
+    This runs as a pure bash command — no LLM tokens consumed during polling.
+
+    Args:
+        ssh_server: SSH host to connect to
+        candidate_gpu_ids: GPU IDs to check
+        threshold_mb: Free memory threshold in MB
+        poll_interval_sec: Seconds between polls
+        max_polls: Maximum number of poll attempts
+        marker_file: Path to write free GPU IDs JSON when found
+
+    Returns:
+        Bash script string
+    """
+    gpu_ids_str = ",".join(str(g) for g in candidate_gpu_ids)
+    # Use ssh-mcp is not available in bash; use direct ssh
+    return f'''#!/bin/bash
+# Sibyl GPU poll: wait for free GPUs on {ssh_server}
+# Candidates: [{gpu_ids_str}], threshold: {threshold_mb}MB
+# Poll every {poll_interval_sec}s, max {max_polls} attempts
+
+MARKER="{marker_file}"
+rm -f "$MARKER"
+
+for i in $(seq 1 {max_polls}); do
+    OUTPUT=$(ssh {ssh_server} "nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits" 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        echo "[poll $i/{max_polls}] SSH failed, retrying in {poll_interval_sec}s..."
+        sleep {poll_interval_sec}
+        continue
+    fi
+
+    # Parse free GPUs
+    FREE_GPUS=""
+    while IFS=',' read -r idx mem; do
+        idx=$(echo "$idx" | tr -d ' ')
+        mem=$(echo "$mem" | tr -d ' ')
+        # Check if this GPU is in our candidate list
+        case ",{gpu_ids_str}," in
+            *",$idx,"*)
+                if [ "$mem" -lt {threshold_mb} ] 2>/dev/null; then
+                    if [ -z "$FREE_GPUS" ]; then
+                        FREE_GPUS="$idx"
+                    else
+                        FREE_GPUS="$FREE_GPUS,$idx"
+                    fi
+                fi
+                ;;
+        esac
+    done <<< "$OUTPUT"
+
+    if [ -n "$FREE_GPUS" ]; then
+        echo "[poll $i/{max_polls}] Found free GPUs: $FREE_GPUS"
+        echo "{{\\"free_gpus\\": [$FREE_GPUS], \\"poll_count\\": $i}}" > "$MARKER"
+        exit 0
+    fi
+
+    echo "[poll $i/{max_polls}] No free GPUs (all above {threshold_mb}MB), waiting {poll_interval_sec}s..."
+    sleep {poll_interval_sec}
+done
+
+echo "Timeout after {max_polls} polls ({max_polls * poll_interval_sec}s)"
+exit 1
+'''
+
+
+def read_poll_result(marker_file: str = "/tmp/sibyl_gpu_free.json") -> list[int] | None:
+    """Read the marker file written by gpu_poll_wait_script.
+
+    Returns list of free GPU IDs, or None if file doesn't exist.
+    """
+    path = Path(marker_file)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data.get("free_gpus", [])
+    except (json.JSONDecodeError, OSError):
+        return None

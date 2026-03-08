@@ -425,8 +425,33 @@ class FarsOrchestrator:
           - gpu_count: how many GPUs it needs
           - estimated_minutes: expected runtime
         If any task is missing these fields, returns a planner action to fix it.
+
+        GPU polling: If gpu_poll_enabled is True, checks free GPUs via SSH
+        before scheduling. If no GPUs are free, returns a bash polling action
+        that waits for availability without consuming LLM tokens.
         """
-        from sibyl.gpu_scheduler import get_batch_info, validate_task_plan
+        from sibyl.gpu_scheduler import (
+            get_batch_info, validate_task_plan,
+            gpu_poll_wait_script, read_poll_result,
+        )
+
+        # --- GPU availability check (shared server) ---
+        if self.config.gpu_poll_enabled:
+            # Check if a previous poll found free GPUs
+            free_gpus = read_poll_result()
+            if free_gpus is not None:
+                # Use polled free GPUs instead of config gpu_ids
+                effective_gpu_ids = [
+                    g for g in free_gpus if g in self.config.gpu_ids
+                ]
+                if not effective_gpu_ids:
+                    # Polled GPUs don't match config → re-poll
+                    return self._gpu_poll_action(stage)
+            else:
+                # No poll result yet → start polling
+                return self._gpu_poll_action(stage)
+        else:
+            effective_gpu_ids = self.config.gpu_ids
 
         # Validate task plan completeness before scheduling
         task_plan_path = self.ws.root / "plan" / "task_plan.json"
@@ -456,13 +481,13 @@ class FarsOrchestrator:
                 pass
 
         info = get_batch_info(
-            self.ws.root, self.config.gpu_ids, mode,
+            self.ws.root, effective_gpu_ids, mode,
             gpus_per_task=self.config.gpus_per_task,
         )
 
         # No task_plan or all tasks complete → single-agent fallback
         if info is None:
-            return self._experiment_skill(mode, ws, self.config.gpu_ids, stage)
+            return self._experiment_skill(mode, ws, effective_gpu_ids, stage)
 
         batch = info["batch"]
 
@@ -538,6 +563,33 @@ class FarsOrchestrator:
             description=(
                 f"Run {mode.lower()} experiments"
                 + (f" on server ({self.config.experiment_mode})" if is_server else "")
+            ),
+            stage=stage,
+        )
+
+    def _gpu_poll_action(self, stage: str) -> Action:
+        """Return a bash action that polls for free GPUs without LLM tokens.
+
+        The script SSH-queries nvidia-smi periodically and writes free GPU IDs
+        to /tmp/sibyl_gpu_free.json when available. The orchestrator reads
+        this file on the next cli_next() call.
+        """
+        from sibyl.gpu_scheduler import gpu_poll_wait_script
+        script = gpu_poll_wait_script(
+            ssh_server=self.config.ssh_server,
+            candidate_gpu_ids=self.config.gpu_ids,
+            threshold_mb=self.config.gpu_free_threshold_mb,
+            poll_interval_sec=self.config.gpu_poll_interval_sec,
+            max_polls=self.config.gpu_poll_max_attempts,
+        )
+        gpu_ids_str = ",".join(str(g) for g in self.config.gpu_ids)
+        return Action(
+            action_type="bash",
+            bash_command=script,
+            description=(
+                f"轮询等待空闲 GPU（候选: [{gpu_ids_str}]，"
+                f"每 {self.config.gpu_poll_interval_sec}s 检查一次，"
+                f"最多 {self.config.gpu_poll_max_attempts} 次）"
             ),
             stage=stage,
         )
