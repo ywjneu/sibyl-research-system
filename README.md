@@ -1,4 +1,4 @@
-# Sibyl System
+# Sibyl Research System
 
 **Fully Autonomous AI Research System with Self-Evolution**
 
@@ -37,7 +37,7 @@ claude --plugin-dir ./plugin
 
 Then tell Claude:
 
-> **"Help me set up Sibyl System. Read docs/setup-guide.md and configure everything."**
+> **"Help me set up Sibyl Research System. Read docs/setup-guide.md and configure everything."**
 
 Claude will automatically check your environment, install dependencies, configure MCP servers, create config files, and ask you only for what it can't detect (GPU server IP, username, etc.). The [setup guide](docs/setup-guide.md) is a step-by-step checklist designed for Claude to follow.
 
@@ -116,7 +116,7 @@ claude --plugin-dir ./plugin
 
 Sibyl orchestrates 20+ AI agents through a **19-stage state-machine pipeline**, automatically completing literature survey, idea generation, experiment design & execution, result analysis, paper writing, and peer review. The system supports multi-round iterative optimization with built-in cross-project learning that continuously improves research quality.
 
-![Sibyl System Architecture](image/sibyl_architecture.png)
+![Sibyl Research System Architecture](image/sibyl_architecture.png)
 
 ### Core Features
 
@@ -391,7 +391,7 @@ When experiment results are unsatisfactory, the supervisor decision agent can tr
 
 ## Comparison
 
-| Feature | Sibyl System | [AI Scientist](https://github.com/SakanaAI/AI-Scientist) | [AutoResearch](https://github.com/karpathy/autoresearch) |
+| Feature | Sibyl Research System | [AI Scientist](https://github.com/SakanaAI/AI-Scientist) | [AutoResearch](https://github.com/karpathy/autoresearch) |
 |---------|-------------|-------------|--------------|
 | Architecture | Claude Code native (skills, teams, MCP) | API wrapper | Single-file script |
 | Agent count | 20+ specialized agents | Single LLM | Single agent |

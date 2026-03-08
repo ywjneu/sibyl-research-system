@@ -1,4 +1,4 @@
-# Sibyl System
+# Sibyl Research System
 
 ## Python 环境（强制规则）
 

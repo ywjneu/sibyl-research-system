@@ -1,6 +1,6 @@
-# Sibyl System Setup Guide (for Claude)
+# Sibyl Research System Setup Guide (for Claude)
 
-This document is the **single source of truth** for configuring Sibyl System. It is designed for Claude Code to read and execute automatically. When a user says "help me set up Sibyl" or "configure Sibyl for me", follow this guide step by step.
+This document is the **single source of truth** for configuring Sibyl Research System. It is designed for Claude Code to read and execute automatically. When a user says "help me set up Sibyl Research System" or "configure Sibyl for me", follow this guide step by step.
 
 **Approach**: Check the current state first, then only fix what's missing. Ask the user for information you cannot detect automatically (GPU server IP, username, etc.). Report progress after each step.
 
@@ -159,7 +159,7 @@ cat config.yaml 2>/dev/null
 
 **Write** `config.yaml`:
 ```yaml
-# Sibyl System - Machine-level config (git-ignored)
+# Sibyl Research System - Machine-level config (git-ignored)
 ssh_server: "<SSH_SERVER_NAME>"
 remote_base: "<REMOTE_BASE>"
 max_gpus: <MAX_GPUS>

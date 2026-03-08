@@ -28,7 +28,7 @@ argument-hint: "<spec_path_or_topic>"
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
-║           SIBYL SYSTEM  ·  Autonomous Research Engine        ║
+║           SIBYL RESEARCH SYSTEM  ·  Autonomous Research Engine        ║
 ╚══════════════════════════════════════════════════════════════╝
 
   项目：<project_name>
