@@ -226,6 +226,17 @@ claude --plugin-dir ./plugin
 
 See **[Getting Started Guide](docs/getting-started.md)** for the full walkthrough.
 
+### Language
+
+The system defaults to **English** for all agent output, logs, intermediate artifacts, and console messages. To switch to Chinese:
+
+```yaml
+# workspaces/<project>/config.yaml
+language: zh
+```
+
+Papers (paper.md, LaTeX) are always written in English regardless of this setting. See [Configuration](docs/configuration.md) for details.
+
 ## Documentation
 
 | Document | Description |

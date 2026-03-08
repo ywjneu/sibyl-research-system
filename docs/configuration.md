@@ -62,6 +62,31 @@ Treat GPUs with low VRAM usage as available, even if allocated.
 | `debate_rounds` | int | `2` | Number of rounds in multi-agent debates |
 | `writing_revision_rounds` | int | `2` | Maximum writing revision rounds after final review |
 
+## Language
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `language` | string | `"en"` | Agent output language: `en` (English) or `zh` (Chinese) |
+
+Controls the language for:
+- **Console output**: Status messages, progress logs, skill invocation summaries
+- **Research artifacts**: Proposals, experiment reports, research diary, outlines, reviews, all intermediate files
+- **Log files**: Stage summaries, error messages, status updates
+
+**Always in English regardless of this setting**:
+- Code and code comments
+- JSON keys
+- References and citations
+- Papers (paper.md) and LaTeX sources
+
+```yaml
+# English (default)
+language: en
+
+# Chinese
+language: zh
+```
+
 ## Writing Mode
 
 | Field | Type | Default | Description |
