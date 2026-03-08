@@ -203,5 +203,21 @@ LOOP:
         - 执行 /compact 压缩当前会话上下文
         - 这确保下一阶段在干净的上下文中启动
 
-  5. 重复直到 done。
+  5. Checkpoint 协议（子步骤恢复）:
+
+     部分 stage（writing_sections, writing_critique, idea_debate, result_debate）
+     支持子步骤 checkpoint。
+
+     执行时:
+     - cli_next() 返回的 action 若包含 checkpoint_info，表示该 stage 支持 checkpoint
+     - checkpoint_info.remaining_steps 列出需要执行的子步骤
+     - checkpoint_info.completed_steps 列出已完成的子步骤（可作为上下文参考）
+     - 如果 checkpoint_info.all_complete == true，直接 cli_record() 推进
+
+     每个子步骤完成后（team 模式下每个 teammate 写完文件后）:
+     .venv/bin/python3 -c "from sibyl.orchestrate import cli_checkpoint; cli_checkpoint('WORKSPACE_PATH', 'STAGE', 'STEP_ID')"
+
+     恢复机制: 中断后重新 cli_next() 会自动检测 checkpoint，只返回未完成的子步骤。
+
+  6. 重复直到 done。
 ```
