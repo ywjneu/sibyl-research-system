@@ -734,6 +734,34 @@ class FarsOrchestrator:
             # No polling: assume GPUs 0..max_gpus-1 are available
             effective_gpu_ids = list(range(self.config.max_gpus))
 
+        # --- Auto-recovery: check for stale running tasks ---
+        from sibyl.experiment_recovery import (
+            load_experiment_state, save_experiment_state,
+            get_running_tasks, migrate_from_gpu_progress,
+        )
+        from sibyl.gpu_scheduler import _load_progress
+        exp_state = load_experiment_state(self.ws.active_root)
+        # Backward compat: migrate from gpu_progress if no experiment_state
+        if not exp_state.tasks:
+            _, running_ids, _, _ = _load_progress(self.ws.active_root)
+            if running_ids:
+                exp_state = migrate_from_gpu_progress(self.ws.active_root)
+                save_experiment_state(self.ws.active_root, exp_state)
+
+        running_tasks = get_running_tasks(exp_state)
+        if running_tasks:
+            # Local sync: check if gpu_progress already marked some as completed
+            completed_set, _, _, _ = _load_progress(self.ws.active_root)
+            import datetime
+            changed = False
+            for tid in running_tasks:
+                if tid in completed_set:
+                    exp_state.tasks[tid]["status"] = "completed"
+                    exp_state.tasks[tid]["completed_at"] = datetime.datetime.now().isoformat()
+                    changed = True
+            if changed:
+                save_experiment_state(self.ws.active_root, exp_state)
+
         # Validate task plan completeness before scheduling
         task_plan_path = self.ws.active_path("plan/task_plan.json")
         if task_plan_path.exists():

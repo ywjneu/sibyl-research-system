@@ -1947,3 +1947,37 @@ class TestExperimentStateIntegration:
         assert "a" in state.tasks
         assert "b" in state.tasks
         assert state.tasks["a"]["status"] == "running"
+
+    def test_experiment_batch_auto_recovers_completed(self, make_orchestrator):
+        from sibyl.experiment_recovery import (
+            load_experiment_state, save_experiment_state, register_task as register_exp_task,
+            ExperimentState,
+        )
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
+        tasks = [
+            {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+            {"id": "b", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+
+        # Pre-populate: experiment_state says both running
+        state = ExperimentState()
+        register_exp_task(state, "a", gpu_ids=[0])
+        register_exp_task(state, "b", gpu_ids=[1])
+        save_experiment_state(o.ws.active_root, state)
+
+        # gpu_progress says "a" completed
+        from sibyl.gpu_scheduler import register_running_tasks
+        register_running_tasks(o.ws.active_root, {"a": [0], "b": [1]})
+        progress_path = o.ws.active_path("exp/gpu_progress.json")
+        progress = json.loads(progress_path.read_text())
+        progress["completed"] = ["a"]
+        del progress["running"]["a"]
+        progress_path.write_text(json.dumps(progress))
+
+        action = o.get_next_action()
+        assert action["stage"] == "pilot_experiments"
+
+        # Verify experiment_state was updated
+        updated = load_experiment_state(o.ws.active_root)
+        assert updated.tasks["a"]["status"] == "completed"
