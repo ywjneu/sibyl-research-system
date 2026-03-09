@@ -1,6 +1,6 @@
 [project]
 name = "sibyl-system"
-version = "0.5.0"
+version = "0.6.0"
 description = "Sibyl Research System - 西比拉自动化研究系统 (Claude Code Native)"
 requires-python = ">=3.11"
 dependencies = [
