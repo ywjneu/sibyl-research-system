@@ -1675,7 +1675,7 @@ class FarsOrchestrator:
                 if self.ws.get_status().iteration_dirs:
                     self.ws.start_new_iteration(iteration + 1)
                 else:
-                    self._clear_iteration_artifacts()
+                    self._clear_iteration_artifacts(iteration)
                 return ("literature_search", iteration + 1)
 
         try:
@@ -1687,7 +1687,7 @@ class FarsOrchestrator:
             return ("done", None)
         return (current_stage, None)
 
-    def _clear_iteration_artifacts(self):
+    def _clear_iteration_artifacts(self, iteration: int = 0):
         """Clear stale working-directory artifacts between iterations.
 
         Called after archive_iteration to prevent data pollution
@@ -1728,6 +1728,17 @@ class FarsOrchestrator:
         if gpu_progress.exists():
             try:
                 gpu_progress.unlink()
+            except OSError:
+                pass
+        # Archive experiment_state.json before clearing
+        exp_state_path = self.ws.active_path("exp/experiment_state.json")
+        if exp_state_path.exists():
+            try:
+                history_dir = self.ws.active_path("exp/history")
+                history_dir.mkdir(parents=True, exist_ok=True)
+                archive_name = f"experiment_state_iter_{iteration:03d}.json"
+                shutil.copy2(exp_state_path, history_dir / archive_name)
+                exp_state_path.unlink()
             except OSError:
                 pass
         # Clear PIVOT cycle markers (per-iteration budget)

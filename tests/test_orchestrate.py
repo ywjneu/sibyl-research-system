@@ -2055,3 +2055,29 @@ class TestCliApplyRecovery:
         assert "task_a" in result["recovered_completed"]
         assert "task_b" in result["still_running"]
         assert result["progress"]["task_b"]["epoch"] == 50
+
+
+class TestExperimentStateArchive:
+    def test_iteration_cleanup_archives_experiment_state(self, make_orchestrator):
+        from sibyl.experiment_recovery import (
+            ExperimentState, register_task, save_experiment_state,
+            load_experiment_state,
+        )
+        o = make_orchestrator(stage="quality_gate", iteration=1)
+        state = ExperimentState()
+        register_task(state, "a", gpu_ids=[0])
+        state.tasks["a"]["status"] = "completed"
+        save_experiment_state(o.ws.active_root, state)
+
+        o._clear_iteration_artifacts(1)
+
+        # experiment_state.json should be gone from active root
+        fresh = load_experiment_state(o.ws.active_root)
+        assert fresh.tasks == {}
+
+        # But archived version should exist
+        archive = o.ws.active_root / "exp" / "history" / "experiment_state_iter_001.json"
+        assert archive.exists()
+        import json as _json
+        archived_data = _json.loads(archive.read_text())
+        assert "a" in archived_data["tasks"]
