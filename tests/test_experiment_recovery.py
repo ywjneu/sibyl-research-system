@@ -6,11 +6,14 @@ import pytest
 
 from sibyl.experiment_recovery import (
     ExperimentState,
+    RecoveryResult,
     load_experiment_state,
     save_experiment_state,
     register_task,
     generate_detection_script,
     parse_detection_output,
+    get_running_tasks,
+    recover_from_detection,
 )
 
 
@@ -108,3 +111,81 @@ class TestRecoveryScriptGeneration:
         assert result["train_b"]["detected_status"] == "running"
         assert result["train_c"]["detected_status"] == "dead"
         assert result["train_d"]["detected_status"] == "unknown"
+
+
+def _make_state_with_tasks(**task_statuses):
+    """Helper: create ExperimentState with tasks at given statuses."""
+    tasks = {}
+    for tid, status in task_statuses.items():
+        tasks[tid] = {"status": status, "gpu_ids": [0], "pid_file": "", "registered_at": ""}
+    return ExperimentState(tasks=tasks)
+
+
+class TestRecoveryLogic:
+    """Task 3: Core recovery logic."""
+
+    def test_get_running_tasks_filters_correctly(self):
+        state = _make_state_with_tasks(
+            t1="running", t2="completed", t3="running", t4="failed"
+        )
+        running = get_running_tasks(state)
+        assert sorted(running) == ["t1", "t3"]
+
+    def test_recover_done_marks_completed(self):
+        state = _make_state_with_tasks(t1="running")
+        detection = {"t1": {"detected_status": "done", "done_info": {"exit_code": 0}}}
+        result = recover_from_detection(state, detection)
+        assert state.tasks["t1"]["status"] == "completed"
+        assert "t1" in result.recovered_completed
+
+    def test_recover_done_failed_marks_failed(self):
+        state = _make_state_with_tasks(t1="running")
+        detection = {"t1": {"detected_status": "done", "done_info": {"exit_code": 1}}}
+        result = recover_from_detection(state, detection)
+        assert state.tasks["t1"]["status"] == "failed"
+        assert "t1" in result.recovered_failed
+
+    def test_recover_running_keeps_running_with_progress(self):
+        state = _make_state_with_tasks(t1="running")
+        detection = {"t1": {"detected_status": "running", "progress": {"epoch": 5}}}
+        result = recover_from_detection(state, detection)
+        assert state.tasks["t1"]["status"] == "running"
+        assert "t1" in result.still_running
+        assert result.progress["t1"] == {"epoch": 5}
+
+    def test_recover_dead_marks_failed(self):
+        state = _make_state_with_tasks(t1="running")
+        detection = {"t1": {"detected_status": "dead", "dead_pid": "12345"}}
+        result = recover_from_detection(state, detection)
+        assert state.tasks["t1"]["status"] == "failed"
+        assert "t1" in result.recovered_failed
+
+    def test_recover_unknown_marks_failed(self):
+        state = _make_state_with_tasks(t1="running")
+        detection = {"t1": {"detected_status": "unknown"}}
+        result = recover_from_detection(state, detection)
+        assert state.tasks["t1"]["status"] == "failed"
+        assert "t1" in result.recovered_failed
+
+    def test_recovery_result_needs_monitor(self):
+        state = _make_state_with_tasks(t1="running", t2="running")
+        detection = {
+            "t1": {"detected_status": "done", "done_info": {"exit_code": 0}},
+            "t2": {"detected_status": "running", "progress": {}},
+        }
+        result = recover_from_detection(state, detection)
+        assert result.needs_monitor is True
+
+        # All done -> no monitor needed
+        state2 = _make_state_with_tasks(t1="running")
+        detection2 = {"t1": {"detected_status": "done", "done_info": {"exit_code": 0}}}
+        result2 = recover_from_detection(state2, detection2)
+        assert result2.needs_monitor is False
+
+    def test_recovery_log_appended(self):
+        state = _make_state_with_tasks(t1="running")
+        detection = {"t1": {"detected_status": "dead", "dead_pid": "999"}}
+        recover_from_detection(state, detection)
+        assert len(state.recovery_log) == 1
+        assert "t1" in state.recovery_log[0]
+        assert state.last_recovery_at != ""

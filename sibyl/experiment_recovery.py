@@ -150,3 +150,81 @@ def parse_detection_output(output: str) -> dict:
             }
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Core Recovery Logic
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RecoveryResult:
+    """Result of applying detection output to experiment state."""
+
+    recovered_completed: list = field(default_factory=list)
+    still_running: list = field(default_factory=list)
+    recovered_failed: list = field(default_factory=list)
+    ssh_unreachable: bool = False
+    needs_monitor: bool = False
+    progress: dict = field(default_factory=dict)
+
+
+def get_running_tasks(state: ExperimentState) -> list[str]:
+    """Return task IDs that are currently in 'running' status."""
+    return [tid for tid, info in state.tasks.items() if info.get("status") == "running"]
+
+
+def recover_from_detection(
+    state: ExperimentState, detection: dict
+) -> RecoveryResult:
+    """Apply detection results to experiment state in-place.
+
+    Args:
+        state: ExperimentState to update (modified in-place)
+        detection: Output from parse_detection_output()
+
+    Returns:
+        RecoveryResult summarizing what happened
+    """
+    result = RecoveryResult()
+    now = datetime.datetime.now().isoformat()
+    log_entries = []
+
+    for task_id, info in detection.items():
+        status = info.get("detected_status", "unknown")
+
+        if status == "done":
+            done_info = info.get("done_info", {})
+            exit_code = done_info.get("exit_code", 0)
+            if exit_code == 0:
+                state.tasks[task_id]["status"] = "completed"
+                result.recovered_completed.append(task_id)
+                log_entries.append(f"[{now}] {task_id}: recovered as completed")
+            else:
+                state.tasks[task_id]["status"] = "failed"
+                result.recovered_failed.append(task_id)
+                log_entries.append(
+                    f"[{now}] {task_id}: recovered as failed (exit_code={exit_code})"
+                )
+        elif status == "running":
+            result.still_running.append(task_id)
+            result.progress[task_id] = info.get("progress", {})
+        elif status == "dead":
+            state.tasks[task_id]["status"] = "failed"
+            result.recovered_failed.append(task_id)
+            dead_pid = info.get("dead_pid", "?")
+            log_entries.append(
+                f"[{now}] {task_id}: process dead (pid={dead_pid}), marked failed"
+            )
+        else:  # unknown
+            state.tasks[task_id]["status"] = "failed"
+            result.recovered_failed.append(task_id)
+            log_entries.append(f"[{now}] {task_id}: unknown status, marked failed")
+
+    result.needs_monitor = len(result.still_running) > 0
+
+    if log_entries:
+        state.recovery_log.extend(log_entries)
+        state.last_recovery_at = now
+
+    return result
