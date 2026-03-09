@@ -1968,6 +1968,17 @@ def cli_experiment_status(workspace_path: str = ""):
 
     est_remaining_min = int(max_remaining_sec / 60)
 
+    # Load experiment state for progress info
+    from sibyl.experiment_recovery import load_experiment_state
+    exp_state = load_experiment_state(active_root)
+    task_progress = {}
+    for tid, task in exp_state.tasks.items():
+        if task.get("progress"):
+            task_progress[tid] = task["progress"]
+    result["task_progress"] = task_progress
+    if exp_state.last_recovery_at:
+        result["last_recovery_at"] = exp_state.last_recovery_at
+
     # Build display string
     lines = []
     lines.append("")

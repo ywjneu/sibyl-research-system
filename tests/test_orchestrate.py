@@ -2102,3 +2102,31 @@ class TestNaturalNextStageExperimentState:
         # record_result should stay in pilot_experiments
         o.record_result("pilot_experiments")
         assert o.ws.get_status().stage == "pilot_experiments"
+
+
+class TestCliExperimentStatusEnhanced:
+    def test_status_shows_progress(self, make_orchestrator):
+        from sibyl.orchestrate import cli_experiment_status
+        from sibyl.experiment_recovery import (
+            ExperimentState, register_task, save_experiment_state,
+        )
+        from sibyl.gpu_scheduler import register_running_tasks
+        import io, sys
+
+        o = make_orchestrator(stage="pilot_experiments")
+        tasks = [{"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10}]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+
+        state = ExperimentState()
+        register_task(state, "a", gpu_ids=[0])
+        state.tasks["a"]["progress"] = {"epoch": 50, "total_epochs": 100, "loss": 0.3}
+        save_experiment_state(o.ws.active_root, state)
+        register_running_tasks(o.ws.active_root, {"a": [0]})
+
+        captured = io.StringIO()
+        sys.stdout = captured
+        cli_experiment_status(str(o.ws.root))
+        sys.stdout = sys.__stdout__
+        result = json.loads(captured.getvalue())
+        assert "task_progress" in result
+        assert result["task_progress"]["a"]["epoch"] == 50
