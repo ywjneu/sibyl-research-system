@@ -576,7 +576,7 @@ class FarsOrchestrator:
         """Single fork skill performs literature search via arXiv + WebSearch."""
         return Action(
             action_type="skill",
-            skills=[{"name": "sibyl-literature", "args": pack_skill_args(topic, ws)}],
+            skills=[{"name": "sibyl-literature", "args": pack_skill_args(ws, topic)}],
             description="文献调研：arXiv 搜索 + Web 搜索，建立领域现状基础",
             stage="literature_search",
         )
@@ -644,12 +644,12 @@ class FarsOrchestrator:
         )
 
         all_teammates = [
-            {"name": "innovator", "skill": "sibyl-innovator", "args": pack_skill_args(topic, ws)},
-            {"name": "pragmatist", "skill": "sibyl-pragmatist", "args": pack_skill_args(topic, ws)},
-            {"name": "theoretical", "skill": "sibyl-theoretical", "args": pack_skill_args(topic, ws)},
-            {"name": "contrarian", "skill": "sibyl-contrarian", "args": pack_skill_args(topic, ws)},
-            {"name": "interdisciplinary", "skill": "sibyl-interdisciplinary", "args": pack_skill_args(topic, ws)},
-            {"name": "empiricist", "skill": "sibyl-empiricist", "args": pack_skill_args(topic, ws)},
+            {"name": "innovator", "skill": "sibyl-innovator", "args": pack_skill_args(ws, topic)},
+            {"name": "pragmatist", "skill": "sibyl-pragmatist", "args": pack_skill_args(ws, topic)},
+            {"name": "theoretical", "skill": "sibyl-theoretical", "args": pack_skill_args(ws, topic)},
+            {"name": "contrarian", "skill": "sibyl-contrarian", "args": pack_skill_args(ws, topic)},
+            {"name": "interdisciplinary", "skill": "sibyl-interdisciplinary", "args": pack_skill_args(ws, topic)},
+            {"name": "empiricist", "skill": "sibyl-empiricist", "args": pack_skill_args(ws, topic)},
         ]
         teammates = [t for t in all_teammates if t["name"] in remaining]
 
@@ -1123,6 +1123,9 @@ class FarsOrchestrator:
 
     def _action_writing_sections(self, ws: str) -> Action:
         mode = self.config.writing_mode
+        codex_fallback = mode == "codex" and not self.config.codex_enabled
+        if codex_fallback:
+            mode = "parallel"
 
         # Checkpoint: track per-section progress (all writing modes)
         steps = {sid: f"writing/sections/{sid}.md" for sid, _ in PAPER_SECTIONS}
@@ -1190,6 +1193,7 @@ class FarsOrchestrator:
                 action_type="team",
                 team=team_dict,
                 description=f"Agent Team: {len(teammates)}人并行撰写论文章节"
+                            + ("（Codex 未启用，已自动回退）" if codex_fallback else "")
                             + (f"（恢复：已完成 {len(cp_info['completed_steps'])}/6）"
                                if cp_info and cp_info["resuming"] else ""),
                 stage="writing_sections",

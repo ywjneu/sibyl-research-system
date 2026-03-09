@@ -561,9 +561,16 @@ class TestActionGeneration:
         assert action["skills"][0]["name"] == "sibyl-sequential-writer"
 
     def test_writing_mode_codex(self, make_orchestrator):
-        o = make_orchestrator(stage="writing_sections", writing_mode="codex")
+        o = make_orchestrator(stage="writing_sections", writing_mode="codex", codex_enabled=True)
         action = o.get_next_action()
         assert action["skills"][0]["name"] == "sibyl-codex-writer"
+
+    def test_writing_mode_codex_falls_back_when_disabled(self, make_orchestrator):
+        o = make_orchestrator(stage="writing_sections", writing_mode="codex", codex_enabled=False)
+        action = o.get_next_action()
+        assert action["action_type"] == "team"
+        assert action["team"]["team_name"] == "sibyl-writing-sections"
+        assert "自动回退" in action["description"]
 
     def test_writing_mode_parallel(self, make_orchestrator):
         o = make_orchestrator(stage="writing_sections", writing_mode="parallel")
@@ -609,6 +616,12 @@ class TestActionGeneration:
 
     def test_experiment_mode_server_codex(self, make_orchestrator):
         o = make_orchestrator(stage="pilot_experiments", experiment_mode="server_codex",
+                              gpu_poll_enabled=False)
+        action = o.get_next_action()
+        assert action["skills"][0]["name"] == "sibyl-server-experimenter"
+
+    def test_experiment_mode_server_claude(self, make_orchestrator):
+        o = make_orchestrator(stage="pilot_experiments", experiment_mode="server_claude",
                               gpu_poll_enabled=False)
         action = o.get_next_action()
         assert action["skills"][0]["name"] == "sibyl-server-experimenter"
@@ -897,7 +910,7 @@ class TestSkillArgContracts:
         action = o.get_next_action()
         args = shlex.split(action["skills"][0]["args"])
 
-        assert args == [topic, str(o.ws.root)]
+        assert args == [str(o.ws.root), topic]
 
     def test_idea_debate_teammates_preserve_topic_spaces(self, make_orchestrator):
         topic = "multi agent planning with language models"
@@ -907,7 +920,7 @@ class TestSkillArgContracts:
         action = o.get_next_action()
         teammate = next(t for t in action["team"]["teammates"] if t["name"] == "innovator")
 
-        assert shlex.split(teammate["args"]) == [topic, str(o.ws.root)]
+        assert shlex.split(teammate["args"]) == [str(o.ws.root), topic]
 
     def test_planner_skill_args_use_explicit_mode(self, make_orchestrator):
         o = make_orchestrator(stage="planning")
@@ -964,6 +977,26 @@ class TestSkillArgContracts:
             o.config.get_remote_env_cmd(o.ws.name),
             "0,1,2,3",
             "server_codex",
+        ]
+
+    def test_server_claude_experimenter_args_include_remote_env_command(self, make_orchestrator):
+        o = make_orchestrator(
+            stage="pilot_experiments",
+            experiment_mode="server_claude",
+            gpu_poll_enabled=False,
+        )
+        action = o.get_next_action()
+        args = shlex.split(action["skills"][0]["args"])
+
+        assert action["skills"][0]["name"] == "sibyl-server-experimenter"
+        assert args[:7] == [
+            "PILOT",
+            str(o.ws.root),
+            "default",
+            "/home/user/sibyl_system",
+            o.config.get_remote_env_cmd(o.ws.name),
+            "0,1,2,3",
+            "server_claude",
         ]
 
     def test_section_writer_args_match_skill_contract(self, make_orchestrator):
