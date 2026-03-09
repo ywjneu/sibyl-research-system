@@ -2215,6 +2215,48 @@ class TestExperimentWaitAction:
         assert action["action_type"] == "experiment_wait"
         assert action["action_type"] != "gpu_poll"
 
+    def test_empty_running_sources_returns_bash_advance(self, make_orchestrator):
+        """Guard: if both experiment_state and gpu_progress show no running tasks,
+        _experiment_wait_action should return a bash action (not infinite poll)."""
+        from sibyl.orchestrate import FarsOrchestrator
+        o = make_orchestrator(stage="experiment_cycle", gpu_poll_enabled=False)
+        tasks = [
+            {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+
+        # Call _experiment_wait_action directly with empty lists
+        action = o._experiment_wait_action("experiment_cycle", [], [])
+        # Should NOT return experiment_wait — guard returns bash
+        assert action.action_type == "bash"
+        assert "no running tasks" in action.bash_command
+
+    def test_all_gpus_occupied_returns_wait_not_schedule(self, make_orchestrator):
+        """When all GPUs are occupied, don't try to schedule — return experiment_wait."""
+        from sibyl.experiment_recovery import (
+            ExperimentState, register_task, save_experiment_state,
+        )
+        from sibyl.gpu_scheduler import register_running_tasks
+
+        # max_gpus=2, both occupied
+        o = make_orchestrator(stage="experiment_cycle", gpu_poll_enabled=False, max_gpus=2)
+        tasks = [
+            {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 60},
+            {"id": "b", "depends_on": [], "gpu_count": 1, "estimated_minutes": 60},
+            {"id": "c", "depends_on": [], "gpu_count": 1, "estimated_minutes": 60},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+
+        # a and b running on GPU 0,1 — c pending but no free GPUs
+        state = ExperimentState()
+        register_task(state, "a", gpu_ids=[0])
+        register_task(state, "b", gpu_ids=[1])
+        save_experiment_state(o.ws.active_root, state)
+        register_running_tasks(o.ws.active_root, {"a": [0], "b": [1]})
+
+        action = o.get_next_action()
+        assert action["action_type"] == "experiment_wait"
+
 
 # ══════════════════════════════════════════════
 # CLI: cli_recover_experiments

@@ -776,9 +776,14 @@ class FarsOrchestrator:
 
             # If tasks still running, check for dispatchable new tasks
             if _exp_running or _running_gpus:
-                _effective_gpus = list(range(self.config.max_gpus))
+                # Exclude GPUs occupied by running tasks
+                _occupied = set(_running_gpus)
+                _free_gpus = [g for g in range(self.config.max_gpus) if g not in _occupied]
+                if not _free_gpus:
+                    # All GPUs occupied → can only wait
+                    return self._experiment_wait_action(stage, _exp_running, _running_gpus)
                 _info = get_batch_info(
-                    self.ws.active_root, _effective_gpus, mode,
+                    self.ws.active_root, _free_gpus, mode,
                     gpus_per_task=self.config.gpus_per_task,
                 )
                 _has_pending = _info is not None and len(_info["batch"]) > 0
@@ -805,7 +810,7 @@ class FarsOrchestrator:
             load_experiment_state, save_experiment_state,
             get_running_tasks, migrate_from_gpu_progress,
         )
-        from sibyl.gpu_scheduler import _load_progress
+        # _load_progress already imported at top of method
         exp_state = load_experiment_state(self.ws.active_root)
         # Backward compat: migrate from gpu_progress if no experiment_state
         if not exp_state.tasks:
@@ -1108,6 +1113,18 @@ class FarsOrchestrator:
         exp_state = load_experiment_state(self.ws.active_root)
         _, _, running_map, _ = _load_progress(self.ws.active_root)
 
+        # Compute canonical running task list: prefer experiment_state, fallback gpu_progress
+        all_running = running_tasks if running_tasks else list(running_map.keys())
+
+        # Guard: if both sources are empty, nothing to wait for
+        if not all_running:
+            return Action(
+                action_type="bash",
+                bash_command='echo "experiment_wait: no running tasks detected, ready to advance"',
+                description="实验已完成，可以推进",
+                stage=stage,
+            )
+
         # Estimate max remaining time across all running tasks
         task_plan_path = self.ws.active_path("plan/task_plan.json")
         task_estimates: dict[str, int] = {}
@@ -1121,7 +1138,7 @@ class FarsOrchestrator:
 
         max_remaining_min = 0
         task_status_lines = []
-        for tid in running_tasks:
+        for tid in all_running:
             est = task_estimates.get(tid, 0)
             started = ""
             gpus = []
@@ -1161,9 +1178,6 @@ class FarsOrchestrator:
 
         # Build SSH check commands
         remote_dir = f"{self.config.remote_base}/projects/{self.ws.name}"
-        all_running = running_tasks or [
-            tid for tid, info in running_map.items()
-        ]
         done_checks = " && ".join(
             f'test -f {remote_dir}/exp/results/{tid}_DONE && echo "{tid}:DONE" || echo "{tid}:PENDING"'
             for tid in all_running
@@ -1182,7 +1196,6 @@ class FarsOrchestrator:
             for tid in all_running
         )
 
-        task_summary = "\n    ".join(task_status_lines)
         desc = (
             f"实验运行中（{len(all_running)} 个任务），"
             f"预计剩余 ~{max_remaining_min}min，"
