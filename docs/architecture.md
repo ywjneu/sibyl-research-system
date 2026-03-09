@@ -51,7 +51,7 @@ The orchestrator returns actions that the main session executes:
 | `bash` | Shell command | `Bash` tool |
 | `gpu_poll` | Poll for free GPUs | SSH MCP → parse → write marker file |
 | `done` | Pipeline complete | Report to user |
-| `paused` | Waiting for resume | Poll every 5 min |
+| `paused` | Auto-resume and continue | Automatically call `cli_resume` |
 
 ## Fork Skills Architecture
 

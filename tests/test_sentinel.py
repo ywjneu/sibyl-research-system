@@ -1,4 +1,4 @@
-"""Tests for Sentinel heartbeat and session persistence."""
+"""Tests for Sentinel heartbeat, session persistence, and breadcrumbs."""
 import json
 import time
 import io
@@ -9,6 +9,7 @@ import pytest
 
 from sibyl.orchestrate import (
     _write_sentinel_heartbeat,
+    _write_breadcrumb,
     cli_sentinel_session,
     cli_sentinel_config,
 )
@@ -161,3 +162,57 @@ class TestSentinelConfig:
 
         data = json.loads(output)
         assert data["paused"] is True
+
+
+class TestBreadcrumb:
+    def test_write_from_action_dict(self, workspace):
+        action = {
+            "action_type": "experiment_wait",
+            "stage": "experiment_cycle",
+            "iteration": 2,
+            "description": "实验运行中（3个任务）",
+        }
+        _write_breadcrumb(str(workspace), action_dict=action)
+        bc = json.loads((workspace / "breadcrumb.json").read_text())
+        assert bc["stage"] == "experiment_cycle"
+        assert bc["action_type"] == "experiment_wait"
+        assert bc["in_loop"] is True
+        assert bc["loop_type"] == "experiment_wait"
+        assert bc["iteration"] == 2
+        assert abs(bc["ts"] - time.time()) < 5
+
+    def test_write_from_completed(self, workspace):
+        _write_breadcrumb(str(workspace), stage="planning", completed=True)
+        bc = json.loads((workspace / "breadcrumb.json").read_text())
+        assert bc["stage"] == "planning"
+        assert bc["action_type"] == "completed"
+        assert bc["in_loop"] is False
+        assert bc["loop_type"] == ""
+
+    def test_non_loop_action(self, workspace):
+        action = {
+            "action_type": "skill",
+            "stage": "literature_search",
+            "description": "文献调研",
+        }
+        _write_breadcrumb(str(workspace), action_dict=action)
+        bc = json.loads((workspace / "breadcrumb.json").read_text())
+        assert bc["in_loop"] is False
+        assert bc["loop_type"] == ""
+
+    def test_gpu_poll_is_loop(self, workspace):
+        action = {"action_type": "gpu_poll", "stage": "experiment_cycle"}
+        _write_breadcrumb(str(workspace), action_dict=action)
+        bc = json.loads((workspace / "breadcrumb.json").read_text())
+        assert bc["in_loop"] is True
+        assert bc["loop_type"] == "gpu_poll"
+
+    def test_description_truncated(self, workspace):
+        action = {
+            "action_type": "skill",
+            "stage": "writing",
+            "description": "x" * 500,
+        }
+        _write_breadcrumb(str(workspace), action_dict=action)
+        bc = json.loads((workspace / "breadcrumb.json").read_text())
+        assert len(bc["description"]) == 200

@@ -76,7 +76,7 @@ LOOP:
 
          4. 读取 marker_file 检查状态:
             - status="all_complete": 所有任务完成，跳出循环
-            - status="timeout": 监控超时，报告并暂停
+            - status="timeout": 监控超时，增大轮询间隔后继续轮询（不暂停）
             - dispatch_needed=true: 有任务刚完成，GPU 释放
 
          5. **动态调度（dispatch_needed=true 时）：**
