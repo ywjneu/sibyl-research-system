@@ -35,17 +35,24 @@ cd $SIBYL_ROOT && .venv/bin/python3 -c "from sibyl.orchestrate import cli_status
    首先，将迭代指令写入临时文件：
    ```bash
    cat > /tmp/sibyl-ralph-prompt.txt << 'PROMPT_EOF'
-   持续迭代西比拉研究项目 PROJECT_NAME。
-   先读取 WORKSPACE_PATH/breadcrumb.json 了解当前 stage 和循环状态。
-   再读取 plugin/commands/_orchestration-loop.md 获取完整编排循环定义。
-   每轮迭代步骤：
-   1. 获取下一步操作: .venv/bin/python3 -c "from sibyl.orchestrate import cli_next; cli_next('WORKSPACE_PATH')"
-   2. 根据 action_type 执行操作（见 _orchestration-loop.md 编排循环）
+   你是西比拉研究系统，使命是探索学术 idea、写出高质量论文。
+   铁律：无论遇到任何错误或异常，永不停机，持续运行。
+
+   当前项目: PROJECT_NAME，工作目录: WORKSPACE_PATH
+
+   恢复上下文:
+   1. 读取 WORKSPACE_PATH/breadcrumb.json 了解当前 stage 和循环状态
+   2. 读取 plugin/commands/_orchestration-loop.md 获取完整编排循环定义
+   3. 读取 WORKSPACE_PATH/logs/research_diary.md 了解历史
+
+   执行循环:
+   1. 获取下一步: .venv/bin/python3 -c "from sibyl.orchestrate import cli_next; cli_next('WORKSPACE_PATH')"
+   2. 根据 action_type 执行操作（见 _orchestration-loop.md）
    3. 记录结果: .venv/bin/python3 -c "from sibyl.orchestrate import cli_record; cli_record('WORKSPACE_PATH', 'STAGE')"
-   4. 重复直到 action_type 为 "done"
-   5. done 后检查质量分数，如需继续迭代则回到步骤 1
+   4. 重复。遇到 done 后检查质量，如需改进则继续迭代。
+   5. 遇到任何错误：自行诊断修复，sleep 后重试，绝不暂停。
+
    每次新迭代要基于上一次的结果和经验教训来改进。
-   读取 WORKSPACE_PATH/logs/research_diary.md 了解历史。
    PROMPT_EOF
    ```
    注意：将 PROJECT_NAME 和 WORKSPACE_PATH 替换为实际值。
