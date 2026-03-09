@@ -14,6 +14,8 @@ from sibyl.experiment_recovery import (
     parse_detection_output,
     get_running_tasks,
     recover_from_detection,
+    sync_to_gpu_progress,
+    migrate_from_gpu_progress,
 )
 
 
@@ -189,3 +191,86 @@ class TestRecoveryLogic:
         assert len(state.recovery_log) == 1
         assert "t1" in state.recovery_log[0]
         assert state.last_recovery_at != ""
+
+
+def _write_gpu_progress(tmp_path, data):
+    """Helper: write gpu_progress.json."""
+    p = tmp_path / "exp" / "gpu_progress.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _read_gpu_progress(tmp_path):
+    """Helper: read gpu_progress.json."""
+    p = tmp_path / "exp" / "gpu_progress.json"
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+class TestStateSyncWithGpuProgress:
+    """Task 4: State sync with gpu_progress.json."""
+
+    def test_sync_completed_removes_from_gpu_running(self, tmp_path):
+        # gpu_progress has t1 in running
+        _write_gpu_progress(tmp_path, {
+            "completed": [],
+            "failed": [],
+            "running": {"t1": {"gpu_ids": [0], "started_at": "2026-01-01"}},
+            "timings": {},
+        })
+        # experiment_state has t1 as completed
+        state = ExperimentState(tasks={
+            "t1": {"status": "completed", "gpu_ids": [0]},
+        })
+        sync_to_gpu_progress(tmp_path, state)
+
+        gp = _read_gpu_progress(tmp_path)
+        assert "t1" not in gp.get("running", {})
+        assert "t1" in gp["completed"]
+
+    def test_sync_failed_removes_from_gpu_progress(self, tmp_path):
+        _write_gpu_progress(tmp_path, {
+            "completed": [],
+            "failed": [],
+            "running": {"t1": {"gpu_ids": [0], "started_at": "2026-01-01"}},
+            "timings": {},
+        })
+        state = ExperimentState(tasks={
+            "t1": {"status": "failed", "gpu_ids": [0]},
+        })
+        sync_to_gpu_progress(tmp_path, state)
+
+        gp = _read_gpu_progress(tmp_path)
+        assert "t1" not in gp.get("running", {})
+        assert "t1" in gp["failed"]
+
+    def test_sync_running_backfills_gpu_progress(self, tmp_path):
+        # gpu_progress exists but t1 is NOT in running map
+        _write_gpu_progress(tmp_path, {
+            "completed": [],
+            "failed": [],
+            "running": {},
+            "timings": {},
+        })
+        state = ExperimentState(tasks={
+            "t1": {"status": "running", "gpu_ids": [2, 3], "registered_at": "2026-01-01"},
+        })
+        sync_to_gpu_progress(tmp_path, state)
+
+        gp = _read_gpu_progress(tmp_path)
+        assert "t1" in gp["running"]
+        assert gp["running"]["t1"]["gpu_ids"] == [2, 3]
+
+    def test_migrate_from_gpu_progress_only(self, tmp_path):
+        _write_gpu_progress(tmp_path, {
+            "completed": ["t1", "t2"],
+            "failed": ["t3"],
+            "running": {"t4": {"gpu_ids": [0, 1], "started_at": "2026-01-01T00:00:00"}},
+            "timings": {},
+        })
+        state = migrate_from_gpu_progress(tmp_path)
+
+        assert state.tasks["t1"]["status"] == "completed"
+        assert state.tasks["t2"]["status"] == "completed"
+        assert state.tasks["t3"]["status"] == "failed"
+        assert state.tasks["t4"]["status"] == "running"
+        assert state.tasks["t4"]["gpu_ids"] == [0, 1]

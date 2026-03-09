@@ -228,3 +228,92 @@ def recover_from_detection(
         state.last_recovery_at = now
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# State Sync with gpu_progress.json
+# ---------------------------------------------------------------------------
+
+GPU_PROGRESS_FILE = "exp/gpu_progress.json"
+
+
+def _load_gpu_progress(workspace_root: Path) -> dict:
+    """Load gpu_progress.json, returning default structure if missing."""
+    path = workspace_root / GPU_PROGRESS_FILE
+    default = {"completed": [], "failed": [], "running": {}, "timings": {}}
+    if not path.exists():
+        return default
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        for k in default:
+            if k not in data:
+                data[k] = type(default[k])()
+        return data
+    except (json.JSONDecodeError, OSError):
+        return default
+
+
+def _save_gpu_progress(workspace_root: Path, data: dict) -> None:
+    """Write gpu_progress.json."""
+    path = workspace_root / GPU_PROGRESS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def sync_to_gpu_progress(workspace_root: Path, state: ExperimentState) -> None:
+    """Sync experiment_state to gpu_progress.json.
+
+    - completed tasks: remove from running, add to completed
+    - failed tasks: remove from running, add to failed
+    - running tasks: backfill into running if missing
+    """
+    gp = _load_gpu_progress(workspace_root)
+
+    for task_id, info in state.tasks.items():
+        status = info.get("status", "")
+
+        if status == "completed":
+            gp["running"].pop(task_id, None)
+            if task_id not in gp["completed"]:
+                gp["completed"].append(task_id)
+
+        elif status == "failed":
+            gp["running"].pop(task_id, None)
+            if task_id not in gp.get("failed", []):
+                gp.setdefault("failed", []).append(task_id)
+
+        elif status == "running":
+            if task_id not in gp["running"]:
+                gp["running"][task_id] = {
+                    "gpu_ids": info.get("gpu_ids", []),
+                    "started_at": info.get("registered_at", ""),
+                }
+
+    _save_gpu_progress(workspace_root, gp)
+
+
+def migrate_from_gpu_progress(workspace_root: Path) -> ExperimentState:
+    """Create ExperimentState from existing gpu_progress.json.
+
+    Used for initial migration when experiment_state.json doesn't exist yet.
+    """
+    gp = _load_gpu_progress(workspace_root)
+    state = ExperimentState()
+
+    for task_id in gp.get("completed", []):
+        state.tasks[task_id] = {"status": "completed", "gpu_ids": []}
+
+    for task_id in gp.get("failed", []):
+        state.tasks[task_id] = {"status": "failed", "gpu_ids": []}
+
+    for task_id, info in gp.get("running", {}).items():
+        state.tasks[task_id] = {
+            "status": "running",
+            "gpu_ids": info.get("gpu_ids", []),
+            "pid_file": "",
+            "registered_at": info.get("started_at", ""),
+        }
+
+    return state
