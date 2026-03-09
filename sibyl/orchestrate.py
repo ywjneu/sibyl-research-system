@@ -2483,3 +2483,139 @@ def cli_migrate_server(project_name: str, ssh_connection: str = "default"):
             "迁移后，新项目将在 projects/ 子目录下创建，互不干扰。"
         ),
     }, indent=2))
+
+
+# ══════════════════════════════════════════════
+# Self-Healing CLI
+# ══════════════════════════════════════════════
+
+def cli_self_heal_scan(workspace_path: str = ""):
+    """CLI: Scan for errors and generate repair tasks.
+
+    Reads logs/errors.jsonl, deduplicates, filters actionable errors,
+    and returns repair tasks with skill routing.
+    """
+    from sibyl.error_collector import ErrorCollector
+    from sibyl.self_heal import SelfHealRouter
+
+    # Determine errors file location
+    if workspace_path:
+        errors_file = Path(workspace_path) / "logs" / "errors.jsonl"
+        state_file = Path(workspace_path) / "logs" / "self_heal_state.json"
+    else:
+        errors_file = Path("logs") / "errors.jsonl"
+        state_file = Path("logs") / "self_heal_state.json"
+
+    collector = ErrorCollector(errors_file)
+    router = SelfHealRouter(state_file)
+
+    errors = collector.read_errors(unprocessed_only=True)
+    errors = router.deduplicate(errors)
+    errors = router.filter_actionable(errors)
+    errors = router.prioritize(errors)
+
+    tasks = []
+    for err in errors:
+        task = router.generate_repair_task(err)
+        tasks.append(task)
+
+    print(json.dumps({
+        "total_unprocessed": len(collector.read_errors(unprocessed_only=True)),
+        "actionable": len(tasks),
+        "tasks": tasks,
+        "self_heal_status": router.get_status(),
+    }, indent=2))
+
+
+def cli_self_heal_record(
+    error_id: str,
+    success: bool,
+    commit_hash: str = "",
+    workspace_path: str = "",
+):
+    """CLI: Record a self-heal fix attempt result."""
+    from sibyl.error_collector import ErrorCollector
+    from sibyl.self_heal import SelfHealRouter
+
+    if workspace_path:
+        errors_file = Path(workspace_path) / "logs" / "errors.jsonl"
+        state_file = Path(workspace_path) / "logs" / "self_heal_state.json"
+    else:
+        errors_file = Path("logs") / "errors.jsonl"
+        state_file = Path("logs") / "self_heal_state.json"
+
+    collector = ErrorCollector(errors_file)
+    router = SelfHealRouter(state_file)
+
+    router.record_fix_attempt(error_id, success, commit_hash or None)
+    if success:
+        collector.mark_processed(error_id)
+
+    print(json.dumps({
+        "error_id": error_id,
+        "success": success,
+        "commit": commit_hash,
+        "status": router.get_status(),
+    }, indent=2))
+
+
+def cli_self_heal_status(workspace_path: str = ""):
+    """CLI: Show self-heal system status."""
+    from sibyl.self_heal import SelfHealRouter
+
+    if workspace_path:
+        state_file = Path(workspace_path) / "logs" / "self_heal_state.json"
+    else:
+        state_file = Path("logs") / "self_heal_state.json"
+
+    router = SelfHealRouter(state_file)
+    status = router.get_status()
+
+    print(json.dumps({
+        "self_heal": status,
+        "summary": {
+            "fixed_count": len(status["fixed"]),
+            "circuit_broken_count": len(status["circuit_broken"]),
+            "in_progress_count": len(status["in_progress"]),
+        },
+    }, indent=2))
+
+
+def self_heal_monitor_script(
+    workspace_path: str,
+    interval_sec: int = 300,
+) -> str:
+    """Generate a background monitor script for self-healing.
+
+    The script periodically scans for errors and outputs status to
+    /tmp/sibyl_self_heal_monitor.json for the main session to read.
+    """
+    return f'''#!/usr/bin/env bash
+# Sibyl Self-Heal Monitor — auto-generated
+WORKSPACE="{workspace_path}"
+ERRORS_FILE="$WORKSPACE/logs/errors.jsonl"
+STATUS_FILE="/tmp/sibyl_self_heal_monitor.json"
+INTERVAL={interval_sec}
+
+while true; do
+    if [ -f "$ERRORS_FILE" ]; then
+        RESULT=$(.venv/bin/python3 -c "
+from sibyl.orchestrate import cli_self_heal_scan
+cli_self_heal_scan('$WORKSPACE')
+" 2>/dev/null)
+        echo "$RESULT" > "$STATUS_FILE"
+
+        # Check if there are actionable tasks
+        ACTIONABLE=$(echo "$RESULT" | .venv/bin/python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print(data.get('actionable', 0))
+" 2>/dev/null || echo "0")
+
+        if [ "$ACTIONABLE" -gt 0 ]; then
+            echo "{{\\"needs_repair\\": true, \\"actionable\\": $ACTIONABLE, \\"timestamp\\": $(date +%s)}}" > "$STATUS_FILE.trigger"
+        fi
+    fi
+    sleep $INTERVAL
+done
+'''
