@@ -1052,7 +1052,7 @@ class FarsOrchestrator:
         2. If implementing the loop manually, run query_cmd via ssh_connection,
            parse free GPUs, and stop after max_attempts when non-zero.
         3. If free GPUs are found, write marker_file and re-call cli_next().
-        4. If polling times out, pause the project instead of looping forever.
+        4. If polling times out, increase interval and continue polling (never pause).
         """
         from sibyl.gpu_scheduler import nvidia_smi_query_cmd, gpu_poll_wait_script
         aggressive = self.config.gpu_aggressive_mode
@@ -1999,6 +1999,42 @@ def _write_sentinel_heartbeat(workspace_path: str, stage: str, action: str):
     }))
 
 
+_LOOP_ACTION_TYPES = {"experiment_wait", "gpu_poll", "paused"}
+
+
+def _write_breadcrumb(workspace_path: str, action_dict: dict | None = None,
+                      stage: str = "", completed: bool = False):
+    """Write breadcrumb file for context recovery after compaction/restart.
+
+    Called by cli_next (with action_dict) and cli_record (with completed=True).
+    """
+    bc_path = Path(workspace_path) / "breadcrumb.json"
+    if action_dict:
+        action_type = action_dict.get("action_type", "")
+        bc = {
+            "ts": time.time(),
+            "stage": action_dict.get("stage", stage),
+            "action_type": action_type,
+            "iteration": action_dict.get("iteration", 0),
+            "workspace_path": workspace_path,
+            "in_loop": action_type in _LOOP_ACTION_TYPES,
+            "loop_type": action_type if action_type in _LOOP_ACTION_TYPES else "",
+            "description": action_dict.get("description", "")[:200],
+        }
+    else:
+        # cli_record: stage completed, no longer in a loop
+        bc = {
+            "ts": time.time(),
+            "stage": stage,
+            "action_type": "completed",
+            "workspace_path": workspace_path,
+            "in_loop": False,
+            "loop_type": "",
+            "description": f"Stage '{stage}' completed, advancing to next",
+        }
+    bc_path.write_text(json.dumps(bc, ensure_ascii=False))
+
+
 def cli_next(workspace_path: str):
     """CLI: Get next action."""
     o = FarsOrchestrator(workspace_path)
@@ -2006,8 +2042,9 @@ def cli_next(workspace_path: str):
     print(json.dumps(action, indent=2))
     try:
         _write_sentinel_heartbeat(workspace_path, action.get("stage", ""), "cli_next")
+        _write_breadcrumb(workspace_path, action_dict=action)
     except Exception:
-        pass  # Heartbeat is best-effort, never block orchestration
+        pass  # Heartbeat + breadcrumb are best-effort
 
 
 def cli_record(workspace_path: str, stage: str, result: str = "",
@@ -2023,6 +2060,7 @@ def cli_record(workspace_path: str, stage: str, result: str = "",
     print(json.dumps(output))
     try:
         _write_sentinel_heartbeat(workspace_path, stage, "cli_record")
+        _write_breadcrumb(workspace_path, stage=stage, completed=True)
     except Exception:
         pass
 

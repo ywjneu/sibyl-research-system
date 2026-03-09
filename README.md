@@ -337,7 +337,7 @@ The self-healing system is a **three-layer architecture**:
 
 1. **Error Collector** (`sibyl/error_collector.py`) — Captures runtime exceptions with full context (traceback, stage, project) into structured JSONL records. A `@wrap_cli` decorator automatically catches errors from all orchestrator CLI functions. Errors are categorized into 7 types: `import`, `test`, `type`, `state`, `config`, `build`, `prompt`.
 
-2. **Error Router** (`sibyl/self_heal.py`) — Deduplicates errors by content hash, sorts by priority (import errors before config errors), and maps each error category to a repair skill pipeline via the **skill route table**. A circuit breaker prevents infinite fix loops: after 3 failed attempts on the same error, it is marked for human intervention.
+2. **Error Router** (`sibyl/self_heal.py`) — Deduplicates errors by content hash, sorts by priority (import errors before config errors), and maps each error category to a repair skill pipeline via the **skill route table**. A circuit breaker prevents infinite fix loops: after 3 failed attempts on the same error, it is logged and skipped, then retried in the next iteration.
 
 3. **Self-Healer Agent** (`sibyl-self-healer` skill) — A fork skill running on the standard tier (Opus) that receives repair tasks and autonomously:
    - Invokes the appropriate skills (e.g., `systematic-debugging` → `tdd-workflow`)

@@ -57,13 +57,18 @@ def test_claude_runtime_assets_are_not_gitignored():
 
 
 def test_plugin_language_defaults_use_zh():
-    for rel_path in (
+    """Language default 'zh' must appear in orchestration loop or command files."""
+    # The language default is now in the shared _orchestration-loop.md
+    checked_files = [
+        "plugin/commands/_orchestration-loop.md",
         "plugin/commands/start.md",
         "plugin/commands/resume.md",
-    ):
-        text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
-        assert '默认 "zh"' in text
-        assert '默认 "en"' not in text
+    ]
+    found_zh = any(
+        '默认 "zh"' in (REPO_ROOT / f).read_text(encoding="utf-8")
+        for f in checked_files
+    )
+    assert found_zh, "No file contains language default 'zh'"
 
 
 def test_no_stale_hardcoded_language_clauses():
@@ -100,17 +105,22 @@ def test_architecture_docs_describe_project_scoped_gpu_marker():
     assert "/tmp/sibyl_<project>_gpu_free.json" in architecture_doc
 
 
-def test_gpu_poll_docs_describe_timeout_contract():
+def test_gpu_poll_docs_describe_never_stop_contract():
+    """GPU poll docs must describe never-stop behavior (no pause on timeout)."""
     required = {
-        "CLAUDE.md": ("action.gpu_poll.max_attempts", "cli_pause", "action.gpu_poll.script"),
-        "plugin/commands/start.md": ("action.gpu_poll.max_attempts", "cli_pause", "gpu_poll_timeout"),
-        "plugin/commands/resume.md": ("action.gpu_poll.max_attempts", "cli_pause", "gpu_poll_timeout"),
+        "CLAUDE.md": ("action.gpu_poll.script", "永不放弃"),
+        "plugin/commands/_orchestration-loop.md": ("gpu_poll", "永不放弃"),
     }
 
     for rel_path, snippets in required.items():
         text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
         for snippet in snippets:
             assert snippet in text, f"{rel_path} missing {snippet}"
+
+    # Verify no file tells the system to pause on GPU poll timeout
+    for rel_path in ("plugin/commands/_orchestration-loop.md",):
+        text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+        assert "gpu_poll_timeout" not in text, f"{rel_path} still references gpu_poll_timeout pause"
 
 
 def test_codex_integration_is_explicit_opt_in_everywhere():
