@@ -85,6 +85,18 @@ Sibyl 的所有 agent 角色已封装为 `context: fork` skill，运行在独立
 - `register_running_tasks()` / `unregister_running_task()`: 注册/注销运行中任务
 - `get_next_batch()` 同时排除 completed 和 running 任务
 
+### 实验状态追踪与恢复（`experiment_state.json`）
+- `exp/experiment_state.json` 是实验任务生命周期的权威源（source of truth）
+- 每个任务状态: pending → running → completed/failed
+- Experimenter 写入远程文件: `.pid`（进程标识）、`_PROGRESS.json`（实时进度）、`_DONE`（完成标记）
+- 恢复检测: SSH 批量脚本检查 DONE 标记 / PID 存活 / 进程死亡
+- `cli_recover_experiments(workspace_path)`: 生成 SSH 检测脚本
+- `cli_apply_recovery(workspace_path, ssh_output)`: 应用 SSH 检测结果，更新状态
+- 状态同步: `experiment_state.json`（权威）→ `gpu_progress.json`（调度视图）→ 远程文件（实际状态）
+- 迭代清理时归档到 `exp/history/experiment_state_iter_NNN.json`
+- `_action_experiment_batch` 入口自动执行本地恢复（检查 gpu_progress 中的 completed）
+- `_natural_next_stage` 同时检查 experiment_state 和 gpu_progress 中的 running 任务
+
 ### Codex 集成
 - `codex_enabled`: 启用后，idea_debate、result_debate、review 阶段可引入 Codex 独立审查
 - team action 通过 `post_steps` 顺序追加 Codex/综合步骤，而不是单独的 `codex_step`
@@ -122,6 +134,8 @@ Sibyl 的所有 agent 角色已封装为 `context: fork` skill，运行在独立
 飞书同步 skill: `.claude/skills/sibyl-lark-sync/SKILL.md`
 
 ## Git 提交规则（强制）
+
+**默认开发分支: `dev`**。日常开发、commit、push 都在 `dev` 分支上进行。`main` 分支仅用于稳定发布。PR 基准分支为 `dev`。
 
 以下情况**必须立即提交 git commit 并 push 到 GitHub**：
 1. 修复 bug（系统代码、编排逻辑、prompt 等）

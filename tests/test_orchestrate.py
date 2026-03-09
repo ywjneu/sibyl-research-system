@@ -21,6 +21,16 @@ from sibyl.workspace import Workspace
 class TestStageTransitions:
     """Test the full pipeline stage progression."""
 
+    def test_init_action_is_noop_before_literature_search(self, make_orchestrator):
+        o = make_orchestrator(stage="init")
+
+        action = o.get_next_action()
+
+        assert action["action_type"] == "bash"
+        assert action["stage"] == "init"
+        assert action["skills"] is None
+        assert "initialized" in action["bash_command"]
+
     def test_init_advances_to_literature_search(self, make_orchestrator):
         o = make_orchestrator(stage="init")
         o.record_result("init")
@@ -513,7 +523,7 @@ class TestActionGeneration:
         o = make_orchestrator(stage="init")
         action = o.get_next_action()
         assert action["stage"] == "init"
-        assert action["action_type"] == "skill"
+        assert action["action_type"] == "bash"
 
     def test_paused_returns_paused_action(self, make_orchestrator):
         o = make_orchestrator(stage="planning")
@@ -855,7 +865,7 @@ class TestCLI:
         )
         (ws_dir / "topic.txt").write_text("test", encoding="utf-8")
         o = FarsOrchestrator(str(ws_dir))
-        assert o.config.ssh_server == "gpu-server"  # default
+        assert o.config.ssh_server == "default"  # default
 
     def test_project_path_wins_over_config_workspaces_dir(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -930,7 +940,7 @@ class TestSkillArgContracts:
         assert args[:5] == [
             "PILOT",
             str(o.ws.root),
-            "gpu-server",
+            "default",
             "/home/user/sibyl_system",
             o.config.get_remote_env_cmd(o.ws.name),
         ]
@@ -949,7 +959,7 @@ class TestSkillArgContracts:
         assert args[:7] == [
             "PILOT",
             str(o.ws.root),
-            "gpu-server",
+            "default",
             "/home/user/sibyl_system",
             o.config.get_remote_env_cmd(o.ws.name),
             "0,1,2,3",
@@ -1090,6 +1100,34 @@ class TestExperimentParallel:
         o.record_result("pilot_experiments")
         assert o.ws.get_status().stage == "experiment_cycle"
 
+    def test_pilot_to_full_resets_runtime_state_and_allows_rerun(self, make_orchestrator):
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False, max_gpus=2)
+        tasks = [
+            {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+            {"id": "b", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+        o.ws.write_file("exp/gpu_progress.json", json.dumps({
+            "completed": ["a", "b"], "failed": [], "running": {}, "timings": {}
+        }))
+        o.ws.write_file("exp/results/a_DONE", "{}")
+        o.ws.write_file("exp/results/b_DONE", "{}")
+        Path(project_marker_file("test-proj", "exp_monitor")).write_text("{}", encoding="utf-8")
+        Path(project_marker_file("test-proj", "gpu_free")).write_text("{}", encoding="utf-8")
+
+        o.record_result("pilot_experiments")
+
+        assert o.ws.get_status().stage == "experiment_cycle"
+        assert not o.ws.active_path("exp/gpu_progress.json").exists()
+        assert not o.ws.active_path("exp/results/a_DONE").exists()
+        assert not o.ws.active_path("exp/results/b_DONE").exists()
+        assert not Path(project_marker_file("test-proj", "exp_monitor")).exists()
+        assert not Path(project_marker_file("test-proj", "gpu_free")).exists()
+
+        action = o.get_next_action()
+        assert action["action_type"] == "skills_parallel"
+        assert len(action["skills"]) == 2
+
     def test_experiment_cycle_parallel(self, make_orchestrator):
         """experiment_cycle also supports parallel scheduling."""
         o = make_orchestrator(stage="experiment_cycle", gpu_poll_enabled=False)
@@ -1225,7 +1263,7 @@ class TestGpuPollingIntegration:
         action = o.get_next_action()
         assert action["action_type"] == "gpu_poll"
         assert action["gpu_poll"] is not None
-        assert action["gpu_poll"]["ssh_connection"] == "gpu-server"
+        assert action["gpu_poll"]["ssh_connection"] == "default"
         assert action["gpu_poll"]["marker_file"] == project_marker_file("test-proj", "gpu_free")
         assert "nvidia-smi" in action["gpu_poll"]["query_cmd"]
         assert action["gpu_poll"]["max_gpus"] == 4
@@ -1893,3 +1931,218 @@ class TestExperimentStatusDisplay:
         assert result["completed_count"] == 1
         assert result["running_count"] == 0
         assert result["pending_count"] == 0
+
+
+class TestExperimentStateIntegration:
+    def test_experiment_batch_registers_in_experiment_state(self, make_orchestrator):
+        from sibyl.experiment_recovery import load_experiment_state
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
+        tasks = [
+            {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+            {"id": "b", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+        action = o.get_next_action()
+        state = load_experiment_state(o.ws.active_root)
+        assert "a" in state.tasks
+        assert "b" in state.tasks
+        assert state.tasks["a"]["status"] == "running"
+
+    def test_experiment_batch_auto_recovers_completed(self, make_orchestrator):
+        from sibyl.experiment_recovery import (
+            load_experiment_state, save_experiment_state, register_task as register_exp_task,
+            ExperimentState,
+        )
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
+        tasks = [
+            {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+            {"id": "b", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+
+        # Pre-populate: experiment_state says both running
+        state = ExperimentState()
+        register_exp_task(state, "a", gpu_ids=[0])
+        register_exp_task(state, "b", gpu_ids=[1])
+        save_experiment_state(o.ws.active_root, state)
+
+        # gpu_progress says "a" completed
+        from sibyl.gpu_scheduler import register_running_tasks
+        register_running_tasks(o.ws.active_root, {"a": [0], "b": [1]})
+        progress_path = o.ws.active_path("exp/gpu_progress.json")
+        progress = json.loads(progress_path.read_text())
+        progress["completed"] = ["a"]
+        del progress["running"]["a"]
+        progress_path.write_text(json.dumps(progress))
+
+        action = o.get_next_action()
+        assert action["stage"] == "pilot_experiments"
+
+        # Verify experiment_state was updated
+        updated = load_experiment_state(o.ws.active_root)
+        assert updated.tasks["a"]["status"] == "completed"
+
+
+# ══════════════════════════════════════════════
+# CLI: cli_recover_experiments
+# ══════════════════════════════════════════════
+
+class TestCliRecoverExperiments:
+    def test_no_running_tasks(self, make_orchestrator):
+        from sibyl.orchestrate import cli_recover_experiments
+        import io, sys
+        o = make_orchestrator(stage="pilot_experiments")
+        captured = io.StringIO()
+        sys.stdout = captured
+        cli_recover_experiments(str(o.ws.root))
+        sys.stdout = sys.__stdout__
+        result = json.loads(captured.getvalue())
+        assert result["status"] == "no_recovery_needed"
+
+    def test_with_running_tasks(self, make_orchestrator):
+        from sibyl.orchestrate import cli_recover_experiments
+        from sibyl.experiment_recovery import (
+            ExperimentState, register_task, save_experiment_state,
+        )
+        import io, sys
+        o = make_orchestrator(stage="pilot_experiments")
+        state = ExperimentState()
+        register_task(state, "task_a", gpu_ids=[0])
+        save_experiment_state(o.ws.active_root, state)
+
+        captured = io.StringIO()
+        sys.stdout = captured
+        cli_recover_experiments(str(o.ws.root))
+        sys.stdout = sys.__stdout__
+        result = json.loads(captured.getvalue())
+        assert result["status"] == "has_running_tasks"
+        assert "task_a" in result["running_tasks"]
+        assert "detection_script" in result
+
+
+# ══════════════════════════════════════════════
+# CLI: cli_apply_recovery
+# ══════════════════════════════════════════════
+
+class TestCliApplyRecovery:
+    def test_apply_recovery_updates_state(self, make_orchestrator):
+        from sibyl.orchestrate import cli_apply_recovery
+        from sibyl.experiment_recovery import (
+            ExperimentState, register_task, save_experiment_state,
+        )
+        from sibyl.gpu_scheduler import register_running_tasks
+        import io, sys
+
+        o = make_orchestrator(stage="pilot_experiments")
+        state = ExperimentState()
+        register_task(state, "task_a", gpu_ids=[0])
+        register_task(state, "task_b", gpu_ids=[1])
+        save_experiment_state(o.ws.active_root, state)
+        register_running_tasks(o.ws.active_root, {"task_a": [0], "task_b": [1]})
+
+        ssh_output = (
+            'DONE:task_a:{"status":"success","summary":"ok"}\n'
+            'RUNNING:task_b:{"epoch":50,"total_epochs":100}\n'
+        )
+
+        captured = io.StringIO()
+        sys.stdout = captured
+        cli_apply_recovery(str(o.ws.root), ssh_output)
+        sys.stdout = sys.__stdout__
+        result = json.loads(captured.getvalue())
+
+        assert result["status"] == "recovered"
+        assert "task_a" in result["recovered_completed"]
+        assert "task_b" in result["still_running"]
+        assert result["progress"]["task_b"]["epoch"] == 50
+
+
+class TestExperimentStateArchive:
+    def test_iteration_cleanup_archives_experiment_state(self, make_orchestrator):
+        from sibyl.experiment_recovery import (
+            ExperimentState, register_task, save_experiment_state,
+            load_experiment_state,
+        )
+        o = make_orchestrator(stage="quality_gate", iteration=1)
+        state = ExperimentState()
+        register_task(state, "a", gpu_ids=[0])
+        state.tasks["a"]["status"] = "completed"
+        save_experiment_state(o.ws.active_root, state)
+
+        o._clear_iteration_artifacts(1)
+
+        # experiment_state.json should be gone from active root
+        fresh = load_experiment_state(o.ws.active_root)
+        assert fresh.tasks == {}
+
+        # But archived version should exist
+        archive = o.ws.active_root / "exp" / "history" / "experiment_state_iter_001.json"
+        assert archive.exists()
+        import json as _json
+        archived_data = _json.loads(archive.read_text())
+        assert "a" in archived_data["tasks"]
+
+
+class TestNaturalNextStageExperimentState:
+    def test_stays_in_stage_when_experiment_state_has_running(self, make_orchestrator):
+        from sibyl.experiment_recovery import (
+            ExperimentState, register_task, save_experiment_state,
+        )
+        o = make_orchestrator(stage="pilot_experiments", gpu_poll_enabled=False)
+        tasks = [
+            {"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10},
+        ]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+
+        # experiment_state says running, but gpu_progress is empty
+        state = ExperimentState()
+        register_task(state, "a", gpu_ids=[0])
+        save_experiment_state(o.ws.active_root, state)
+
+        # record_result should stay in pilot_experiments
+        o.record_result("pilot_experiments")
+        assert o.ws.get_status().stage == "pilot_experiments"
+
+
+class TestCliExperimentStatusEnhanced:
+    def test_status_shows_progress(self, make_orchestrator):
+        from sibyl.orchestrate import cli_experiment_status
+        from sibyl.experiment_recovery import (
+            ExperimentState, register_task, save_experiment_state,
+        )
+        from sibyl.gpu_scheduler import register_running_tasks
+        import io, sys
+
+        o = make_orchestrator(stage="pilot_experiments")
+        tasks = [{"id": "a", "depends_on": [], "gpu_count": 1, "estimated_minutes": 10}]
+        o.ws.write_file("plan/task_plan.json", json.dumps({"tasks": tasks}))
+
+        state = ExperimentState()
+        register_task(state, "a", gpu_ids=[0])
+        state.tasks["a"]["progress"] = {"epoch": 50, "total_epochs": 100, "loss": 0.3}
+        save_experiment_state(o.ws.active_root, state)
+        register_running_tasks(o.ws.active_root, {"a": [0]})
+
+        captured = io.StringIO()
+        sys.stdout = captured
+        cli_experiment_status(str(o.ws.root))
+        sys.stdout = sys.__stdout__
+        result = json.loads(captured.getvalue())
+        assert "task_progress" in result
+        assert result["task_progress"]["a"]["epoch"] == 50
+
+
+class TestResetExperimentRuntimeClearsState:
+    def test_reset_experiment_runtime_clears_experiment_state(self, make_orchestrator):
+        from sibyl.experiment_recovery import (
+            ExperimentState, register_task, save_experiment_state,
+            load_experiment_state,
+        )
+        o = make_orchestrator(stage="pilot_experiments")
+        state = ExperimentState()
+        register_task(state, "a", gpu_ids=[0])
+        save_experiment_state(o.ws.active_root, state)
+
+        o._reset_experiment_runtime_state()
+        fresh = load_experiment_state(o.ws.active_root)
+        assert fresh.tasks == {}

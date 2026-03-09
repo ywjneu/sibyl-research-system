@@ -457,10 +457,14 @@ class FarsOrchestrator:
             self.ws.update_stage("review")
 
         if stage == "init":
-            # init is a transient stage; _get_next_stage("init") advances to literature_search
-            action = self._action_literature_search(topic, ws)
-            action.stage = "init"  # keep stage matching current state for record_result validation
-            return action
+            # init is a transient stage; the real research work starts at
+            # literature_search after callers record init as complete.
+            return Action(
+                action_type="bash",
+                bash_command="echo 'Sibyl project initialized'",
+                description="项目初始化完成，推进到 literature_search 后再执行文献调研",
+                stage="init",
+            )
 
         elif stage == "literature_search":
             return self._action_literature_search(topic, ws)
@@ -730,6 +734,34 @@ class FarsOrchestrator:
             # No polling: assume GPUs 0..max_gpus-1 are available
             effective_gpu_ids = list(range(self.config.max_gpus))
 
+        # --- Auto-recovery: check for stale running tasks ---
+        from sibyl.experiment_recovery import (
+            load_experiment_state, save_experiment_state,
+            get_running_tasks, migrate_from_gpu_progress,
+        )
+        from sibyl.gpu_scheduler import _load_progress
+        exp_state = load_experiment_state(self.ws.active_root)
+        # Backward compat: migrate from gpu_progress if no experiment_state
+        if not exp_state.tasks:
+            _, running_ids, _, _ = _load_progress(self.ws.active_root)
+            if running_ids:
+                exp_state = migrate_from_gpu_progress(self.ws.active_root)
+                save_experiment_state(self.ws.active_root, exp_state)
+
+        running_tasks = get_running_tasks(exp_state)
+        if running_tasks:
+            # Local sync: check if gpu_progress already marked some as completed
+            completed_set, _, _, _ = _load_progress(self.ws.active_root)
+            import datetime
+            changed = False
+            for tid in running_tasks:
+                if tid in completed_set:
+                    exp_state.tasks[tid]["status"] = "completed"
+                    exp_state.tasks[tid]["completed_at"] = datetime.datetime.now().isoformat()
+                    changed = True
+            if changed:
+                save_experiment_state(self.ws.active_root, exp_state)
+
         # Validate task plan completeness before scheduling
         task_plan_path = self.ws.active_path("plan/task_plan.json")
         if task_plan_path.exists():
@@ -811,6 +843,17 @@ class FarsOrchestrator:
                 task_gpu_map[tid] = assignment["gpu_ids"]
                 all_task_ids.append(tid)
         register_running_tasks(self.ws.active_root, task_gpu_map)
+
+        # Register in experiment_state.json (authoritative lifecycle)
+        from sibyl.experiment_recovery import (
+            load_experiment_state, save_experiment_state, register_task as register_exp_task,
+        )
+        exp_state = load_experiment_state(self.ws.active_root)
+        remote_dir = f"{self.config.remote_base}/projects/{self.ws.name}"
+        for tid, gpus in task_gpu_map.items():
+            pid_file = f"{remote_dir}/exp/results/{tid}.pid"
+            register_exp_task(exp_state, tid, gpu_ids=gpus, pid_file=pid_file)
+        save_experiment_state(self.ws.active_root, exp_state)
 
         # Build experiment monitor for background progress tracking
         monitor = self._build_experiment_monitor(all_task_ids, est_min)
@@ -1565,6 +1608,14 @@ class FarsOrchestrator:
         if current_stage in ("pilot_experiments", "experiment_cycle"):
             from sibyl.gpu_scheduler import get_batch_info, get_running_gpu_ids
             exp_mode = "PILOT" if current_stage == "pilot_experiments" else "FULL"
+            # Check experiment_state.json for running tasks (authoritative)
+            from sibyl.experiment_recovery import (
+                load_experiment_state, get_running_tasks as get_exp_running,
+            )
+            exp_state = load_experiment_state(self.ws.active_root)
+            exp_running = get_exp_running(exp_state)
+            if exp_running:
+                return (current_stage, None)  # wait for running tasks
             # Check if any tasks are still running
             running_gpus = get_running_gpu_ids(self.ws.active_root)
             if running_gpus:
@@ -1608,6 +1659,9 @@ class FarsOrchestrator:
         if current_stage == "writing_latex" and not self.config.review_enabled:
             return ("reflection", None)
 
+        if current_stage == "pilot_experiments":
+            self._reset_experiment_runtime_state()
+
         # quality_gate: execute side effects and determine next stage
         if current_stage == "quality_gate":
             is_done, qg_score, threshold, max_iters, iteration = self._is_pipeline_done()
@@ -1629,7 +1683,7 @@ class FarsOrchestrator:
                 if self.ws.get_status().iteration_dirs:
                     self.ws.start_new_iteration(iteration + 1)
                 else:
-                    self._clear_iteration_artifacts()
+                    self._clear_iteration_artifacts(iteration)
                 return ("literature_search", iteration + 1)
 
         try:
@@ -1641,7 +1695,7 @@ class FarsOrchestrator:
             return ("done", None)
         return (current_stage, None)
 
-    def _clear_iteration_artifacts(self):
+    def _clear_iteration_artifacts(self, iteration: int = 0):
         """Clear stale working-directory artifacts between iterations.
 
         Called after archive_iteration to prevent data pollution
@@ -1684,6 +1738,17 @@ class FarsOrchestrator:
                 gpu_progress.unlink()
             except OSError:
                 pass
+        # Archive experiment_state.json before clearing
+        exp_state_path = self.ws.active_path("exp/experiment_state.json")
+        if exp_state_path.exists():
+            try:
+                history_dir = self.ws.active_path("exp/history")
+                history_dir.mkdir(parents=True, exist_ok=True)
+                archive_name = f"experiment_state_iter_{iteration:03d}.json"
+                shutil.copy2(exp_state_path, history_dir / archive_name)
+                exp_state_path.unlink()
+            except OSError:
+                pass
         # Clear PIVOT cycle markers (per-iteration budget)
         logs_dir = self.ws.project_path("logs")
         if logs_dir.exists():
@@ -1702,6 +1767,37 @@ class FarsOrchestrator:
             self.ws.write_file("reflection/lessons_learned.md", lessons_content)
         if action_plan_content:
             self.ws.write_file("reflection/prev_action_plan.json", action_plan_content)
+
+    def _reset_experiment_runtime_state(self):
+        """Clear transient experiment scheduler state before the full stage."""
+        gpu_progress = self.ws.active_path("exp/gpu_progress.json")
+        if gpu_progress.exists():
+            try:
+                gpu_progress.unlink()
+            except OSError:
+                pass
+
+        results_dir = self.ws.active_path("exp/results")
+        if results_dir.exists():
+            for marker in results_dir.glob("*_DONE"):
+                try:
+                    marker.unlink()
+                except OSError:
+                    pass
+
+        for suffix in ("exp_monitor", "gpu_free"):
+            marker_path = Path(project_marker_file(self.ws.name, suffix))
+            try:
+                marker_path.unlink()
+            except OSError:
+                pass
+
+        exp_state_path = self.ws.active_path("exp/experiment_state.json")
+        if exp_state_path.exists():
+            try:
+                exp_state_path.unlink()
+            except OSError:
+                pass
 
     def _get_current_cycle(self) -> int:
         """Get current idea-experiment cycle number."""
@@ -1879,6 +1975,17 @@ def cli_experiment_status(workspace_path: str = ""):
 
     est_remaining_min = int(max_remaining_sec / 60)
 
+    # Load experiment state for progress info
+    from sibyl.experiment_recovery import load_experiment_state
+    exp_state = load_experiment_state(active_root)
+    task_progress = {}
+    for tid, task in exp_state.tasks.items():
+        if task.get("progress"):
+            task_progress[tid] = task["progress"]
+    result["task_progress"] = task_progress
+    if exp_state.last_recovery_at:
+        result["last_recovery_at"] = exp_state.last_recovery_at
+
     # Build display string
     lines = []
     lines.append("")
@@ -2028,6 +2135,88 @@ def cli_dispatch_tasks(workspace_path: str):
         "description": f"动态调度: {gpu_summary}",
         "estimated_minutes": info["estimated_minutes"],
     }, indent=2))
+
+
+def cli_recover_experiments(workspace_path: str):
+    """CLI: Detect and prepare recovery for interrupted experiments.
+
+    Loads experiment_state.json, checks for running tasks, and if found,
+    generates a detection script to run via SSH to determine actual status.
+
+    Output JSON:
+        {"status": "no_recovery_needed", "total_tasks": N}
+        or {"status": "has_running_tasks", "running_tasks": [...],
+            "detection_script": "...", "ssh_server": "...",
+            "instructions": "..."}
+    """
+    from sibyl.experiment_recovery import (
+        load_experiment_state, migrate_from_gpu_progress,
+        save_experiment_state, get_running_tasks, generate_detection_script,
+    )
+
+    active_root = resolve_active_workspace_path(workspace_path)
+    state = load_experiment_state(active_root)
+
+    # If no tasks tracked, try migrating from gpu_progress.json
+    if not state.tasks:
+        state = migrate_from_gpu_progress(active_root)
+        if state.tasks:
+            save_experiment_state(active_root, state)
+
+    running = get_running_tasks(state)
+    if not running:
+        print(json.dumps({
+            "status": "no_recovery_needed",
+            "total_tasks": len(state.tasks),
+        }, indent=2))
+        return
+
+    o = FarsOrchestrator(workspace_path)
+    remote_project_dir = f"{o.config.remote_base}/projects/{o.ws.name}"
+    script = generate_detection_script(remote_project_dir, running)
+
+    print(json.dumps({
+        "status": "has_running_tasks",
+        "running_tasks": running,
+        "detection_script": script,
+        "ssh_server": o.config.ssh_server,
+        "instructions": (
+            "Run the detection_script on the remote server via SSH, "
+            "then pass the output to cli_apply_recovery."
+        ),
+    }, indent=2))
+
+
+def cli_apply_recovery(workspace_path: str, ssh_output: str):
+    """CLI: Apply recovery based on SSH detection output.
+
+    Parses the output from a detection script, updates experiment_state,
+    syncs to gpu_progress.json, and returns a recovery summary.
+
+    Output JSON:
+        {"status": "recovered", "recovered_completed": [...],
+         "still_running": [...], "recovered_failed": [...],
+         "progress": {...}}
+    """
+    from sibyl.experiment_recovery import (
+        load_experiment_state, save_experiment_state,
+        parse_detection_output, recover_from_detection,
+        sync_to_gpu_progress,
+    )
+    from dataclasses import asdict as _asdict
+
+    active_root = resolve_active_workspace_path(workspace_path)
+    state = load_experiment_state(active_root)
+
+    detection = parse_detection_output(ssh_output)
+    result = recover_from_detection(state, detection)
+
+    save_experiment_state(active_root, state)
+    sync_to_gpu_progress(active_root, state)
+
+    output = _asdict(result)
+    output["status"] = "recovered"
+    print(json.dumps(output, indent=2))
 
 
 def cli_list_projects(workspaces_dir: str = "workspaces"):
