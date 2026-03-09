@@ -80,6 +80,20 @@ class Workspace:
         "logs/iterations",
         "lark_sync",
     ]
+    _PROJECT_SCOPED_FILES = {
+        "status.json",
+        "config.yaml",
+        "topic.txt",
+        "spec.md",
+        ".gitignore",
+    }
+    _PROJECT_SCOPED_PREFIXES = (
+        "shared/",
+        "logs/",
+        "current/",
+        "iter_",
+        ".git/",
+    )
 
     def __init__(self, base_dir: Path, project_name: str,
                  iteration_dirs: bool = False):
@@ -88,27 +102,46 @@ class Workspace:
         self._init_iteration_dirs = iteration_dirs
         self._init_dirs()
 
+    def _ensure_standard_dirs(self, base_dir: Path):
+        for d in self._STANDARD_DIRS:
+            (base_dir / d).mkdir(parents=True, exist_ok=True)
+
+    def _default_iteration_dir(self) -> Path:
+        status_path = self.root / "status.json"
+        if status_path.exists():
+            try:
+                data = json.loads(status_path.read_text(encoding="utf-8"))
+                iteration = int(data.get("iteration", 0) or 0)
+                if iteration > 0:
+                    iter_dir = self.root / f"iter_{iteration:03d}"
+                    if iter_dir.exists():
+                        return iter_dir
+            except (json.JSONDecodeError, OSError, TypeError, ValueError):
+                pass
+        return self.root / "iter_001"
+
     def _init_dirs(self):
         # Always create shared/ directory
         (self.root / "shared").mkdir(parents=True, exist_ok=True)
 
         if self._init_iteration_dirs:
-            # Create iter_001/ with standard dirs, plus current symlink
-            iter_dir = self.root / "iter_001"
-            for d in self._STANDARD_DIRS:
-                (iter_dir / d).mkdir(parents=True, exist_ok=True)
-            # Create or update current symlink
             current_link = self.root / "current"
+            active_iter_dir = None
             if current_link.is_symlink():
-                current_link.unlink()
-            elif current_link.exists():
-                shutil.rmtree(current_link)
-            current_link.symlink_to("iter_001")
-            # Project-level logs dir (not per-iteration)
+                try:
+                    resolved = current_link.resolve()
+                except OSError:
+                    resolved = None
+                if resolved and resolved.exists():
+                    active_iter_dir = resolved
+            if active_iter_dir is None:
+                active_iter_dir = self._default_iteration_dir()
+            self._ensure_standard_dirs(active_iter_dir)
+            if not current_link.exists():
+                current_link.symlink_to(active_iter_dir.name)
             (self.root / "logs" / "iterations").mkdir(parents=True, exist_ok=True)
         else:
-            for d in self._STANDARD_DIRS:
-                (self.root / d).mkdir(parents=True, exist_ok=True)
+            self._ensure_standard_dirs(self.root)
 
         # init status
         status_path = self.root / "status.json"
@@ -221,14 +254,40 @@ class Workspace:
     def is_paused(self) -> bool:
         return self.get_status().paused_at > 0
 
-    def _check_path(self, rel_path: str) -> Path:
-        """Resolve rel_path under workspace root and guard against traversal."""
-        resolved = (self.root / rel_path).resolve()
+    @property
+    def active_root(self) -> Path:
+        """Return the active working directory for research artifacts."""
+        status = self.get_status()
+        if status.iteration_dirs and (self.root / "current").exists():
+            return self.root / "current"
+        return self.root
+
+    def project_path(self, rel_path: str = "") -> Path:
+        """Resolve a path relative to the project root."""
+        return self._resolve_under(self.root, rel_path)
+
+    def active_path(self, rel_path: str = "") -> Path:
+        """Resolve a path relative to the active iteration/current workspace."""
+        return self._resolve_under(self.active_root, rel_path)
+
+    def _resolve_under(self, base: Path, rel_path: str) -> Path:
+        resolved = (base / rel_path).resolve()
         if not resolved.is_relative_to(self.root.resolve()):
             raise ValueError(
                 f"Path traversal detected: '{rel_path}' resolves outside workspace"
             )
         return resolved
+
+    def _is_project_scoped_path(self, rel_path: str) -> bool:
+        return (
+            rel_path in self._PROJECT_SCOPED_FILES
+            or any(rel_path.startswith(prefix) for prefix in self._PROJECT_SCOPED_PREFIXES)
+        )
+
+    def _check_path(self, rel_path: str) -> Path:
+        """Resolve rel_path under workspace root and guard against traversal."""
+        base = self.root if self._is_project_scoped_path(rel_path) else self.active_root
+        return self._resolve_under(base, rel_path)
 
     def write_file(self, rel_path: str, content: str):
         path = self._check_path(rel_path)
@@ -364,6 +423,7 @@ class Workspace:
                     "completed_at": 0.0,
                     "file_mtime": 0.0,
                     "file_size": 0,
+                    "artifacts": [],
                 }
                 for step_id, file_path in steps.items()
             },
@@ -373,21 +433,65 @@ class Workspace:
     def load_checkpoint(self, checkpoint_dir: str) -> dict | None:
         return self.read_json(f"{checkpoint_dir}/.checkpoint.json")
 
-    def complete_checkpoint_step(self, checkpoint_dir: str, step_id: str):
+    def _snapshot_checkpoint_file(self, relative_path: str) -> dict | None:
+        """Return metadata snapshot for a checkpoint-tracked file."""
+        file_path = self._check_path(relative_path)
+        if not file_path.exists():
+            return None
+        stat = file_path.stat()
+        if stat.st_size == 0:
+            return None
+        return {
+            "path": relative_path,
+            "file_mtime": stat.st_mtime,
+            "file_size": stat.st_size,
+        }
+
+    def _is_checkpoint_snapshot_valid(self, snapshot: dict,
+                                      started_at: float) -> bool:
+        """Validate a checkpoint-tracked file snapshot."""
+        file_path = self._check_path(snapshot["path"])
+        if not file_path.exists():
+            return False
+        stat = file_path.stat()
+        if stat.st_mtime < started_at:
+            return False
+        if stat.st_size == 0 or stat.st_size != snapshot["file_size"]:
+            return False
+        return True
+
+    def complete_checkpoint_step(self, checkpoint_dir: str, step_id: str,
+                                 artifacts: list[str] | None = None,
+                                 require_artifacts_metadata: bool = False):
         """Mark a sub-step as completed with file validation data."""
         cp = self.load_checkpoint(checkpoint_dir)
         if cp is None or step_id not in cp["steps"]:
-            return
+            return {"completed": False, "missing_files": []}
         step = cp["steps"][step_id]
-        file_path = self._check_path(step["file"])
-        if not file_path.exists():
-            return
-        stat = file_path.stat()
+        primary_snapshot = self._snapshot_checkpoint_file(step["file"])
+        if primary_snapshot is None:
+            return {"completed": False, "missing_files": [step["file"]]}
+
+        artifact_snapshots = []
+        missing_files = []
+        if require_artifacts_metadata and artifacts is None:
+            return {"completed": False, "missing_files": []}
+        for artifact in artifacts or []:
+            snapshot = self._snapshot_checkpoint_file(artifact)
+            if snapshot is None:
+                missing_files.append(artifact)
+                continue
+            artifact_snapshots.append(snapshot)
+        if missing_files:
+            return {"completed": False, "missing_files": missing_files}
+
         step["status"] = "completed"
         step["completed_at"] = time.time()
-        step["file_mtime"] = stat.st_mtime
-        step["file_size"] = stat.st_size
+        step["file_mtime"] = primary_snapshot["file_mtime"]
+        step["file_size"] = primary_snapshot["file_size"]
+        step["artifacts"] = artifact_snapshots
         self.write_json(f"{checkpoint_dir}/.checkpoint.json", cp)
+        return {"completed": True, "missing_files": []}
 
     def validate_checkpoint(self, checkpoint_dir: str,
                             current_iteration: int | None = None) -> dict | None:
@@ -414,15 +518,18 @@ class Workspace:
             if step["status"] != "completed":
                 remaining.append(step_id)
                 continue
-            file_path = self._check_path(step["file"])
-            if not file_path.exists():
+            primary_snapshot = {
+                "path": step["file"],
+                "file_mtime": step["file_mtime"],
+                "file_size": step["file_size"],
+            }
+            if not self._is_checkpoint_snapshot_valid(primary_snapshot, started_at):
                 remaining.append(step_id)
                 continue
-            stat = file_path.stat()
-            if stat.st_mtime < started_at:
-                remaining.append(step_id)
-                continue
-            if stat.st_size == 0 or stat.st_size != step["file_size"]:
+            if any(
+                not self._is_checkpoint_snapshot_valid(artifact, started_at)
+                for artifact in step.get("artifacts", [])
+            ):
                 remaining.append(step_id)
                 continue
             completed.append(step_id)
@@ -441,8 +548,8 @@ class Workspace:
         """Return a summary of the project for status dashboards."""
         status = self.get_status()
         files = self.list_files()
-        has_paper = (self.root / "writing" / "paper.md").exists()
-        has_proposal = (self.root / "idea" / "proposal.md").exists()
+        has_paper = self.active_path("writing/paper.md").exists()
+        has_proposal = self.active_path("idea/proposal.md").exists()
         pilot_results = self.list_files("exp/results/pilots")
         full_results = self.list_files("exp/results/full")
         return {

@@ -1,6 +1,7 @@
-"""Structured experiment records for Sibyl v4.
+"""Internal structured experiment record helpers.
 
-JSONL-based experiment database for tracking all experiments.
+JSONL-based experiment database utilities kept for tests and future pipeline
+integration. The current main orchestration path does not depend on this module.
 """
 import json
 import time

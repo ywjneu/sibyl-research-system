@@ -38,13 +38,14 @@ Sibyl 的所有 agent 角色已封装为 `context: fork` skill，运行在独立
 
 ### Skills（`.claude/skills/sibyl-*/`）
 编排器返回的 action 包含 `action_type: "skill"` 或 `"skills_parallel"`，主 session 通过 `/sibyl-xxx` 或 Skill tool 调用。每个 skill 通过 `!`command`` 动态加载对应的 prompt 模板。
+`.claude/agents/*.md` 与 `.claude/skills/*/SKILL.md` 属于运行时资产，必须和 Python 编排器一起版本管理。
 
 ### Action 类型
 | action_type | 说明 |
 |---|---|
 | `skill` | 单个 fork skill 执行 |
 | `skills_parallel` | 多个 fork skill 并行 |
-| `team` | Agent Team 多人协作（辩论阶段），可含 `codex_step` |
+| `team` | Agent Team 多人协作，结构为 `team_name + teammates[] + post_steps[] + prompt` |
 | `agents_parallel` | 遗留：cross-critique 仍用此方式（6 个动态 prompt） |
 | `bash` | 执行 shell 命令 |
 | `gpu_poll` | GPU 轮询等待（见下方说明） |
@@ -53,15 +54,23 @@ Sibyl 的所有 agent 角色已封装为 `context: fork` skill，运行在独立
 ### GPU 轮询（`gpu_poll` action）
 当所有 GPU 被占用时，orchestrator 返回 `action_type: "gpu_poll"`，主 session 执行：
 ```
-1. 用 SSH MCP (execute-command, connection=action.gpu_poll.ssh_connection)
-   执行 action.gpu_poll.query_cmd
-2. 调用 parse_free_gpus(output, candidate_gpu_ids, threshold_mb) 解析结果
-3. 如果有空闲 GPU:
-   - 写入 marker_file: {"free_gpus": [...], "poll_count": N}
-   - 重新调用 cli_next() 获取实验任务
-4. 如果没有空闲 GPU:
-   - sleep action.gpu_poll.interval_sec 秒
-   - 回到步骤 1 继续轮询（无限等待）
+1. **优先执行 `action.gpu_poll.script`**：
+   - 该脚本已经内置 `interval_sec`、aggressive mode、`max_attempts`
+   - exit 0: 找到空闲 GPU，marker_file 已写好
+   - exit 1: 达到 `action.gpu_poll.max_attempts` 仍无空闲 GPU
+2. 如果不能直接执行 script，才按以下协议手工实现：
+   - 用 SSH MCP (execute-command, connection=action.gpu_poll.ssh_connection)
+     执行 action.gpu_poll.query_cmd
+   - 调用 parse_free_gpus(output, candidate_gpu_ids, threshold_mb) 解析结果
+   - 如果有空闲 GPU:
+     - 写入 marker_file: {"free_gpus": [...], "poll_count": N}
+     - 重新调用 cli_next() 获取实验任务
+   - 如果没有空闲 GPU:
+     - sleep action.gpu_poll.interval_sec 秒
+     - 若 `action.gpu_poll.max_attempts == 0`，继续轮询
+     - 若 `action.gpu_poll.max_attempts > 0` 且达到上限，调用
+       `.venv/bin/python3 -c "from sibyl.orchestrate import cli_pause; cli_pause('WORKSPACE_PATH', 'gpu_poll_timeout')"`
+       将项目暂停，并向用户报告 GPU 轮询超时
 ```
 
 ### 动态 GPU 调度（实验监控中）
@@ -77,8 +86,8 @@ Sibyl 的所有 agent 角色已封装为 `context: fork` skill，运行在独立
 - `get_next_batch()` 同时排除 completed 和 running 任务
 
 ### Codex 集成
-- `codex_enabled`: 启用后，idea_debate、result_debate、supervisor_review 阶段自动引入 Codex 独立审查
-- team action 的 `codex_step` 字段指定 Codex 审查 skill，在 team 讨论后执行
+- `codex_enabled`: 启用后，idea_debate、result_debate、review 阶段可引入 Codex 独立审查
+- team action 通过 `post_steps` 顺序追加 Codex/综合步骤，而不是单独的 `codex_step`
 - Codex 来源: OpenAI Codex CLI (`codex mcp-server` stdio)，配置在 `~/.codex/config.toml`
 - 实际模型: gpt-5.4 high（由 config.toml 配置，MCP 调用时**不传 model 参数**，设 `approval-policy: "never"`）
 

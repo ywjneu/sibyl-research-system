@@ -13,5 +13,6 @@ MODE: $ARGUMENTS[0]
 Workspace path: $ARGUMENTS[1]
 SSH server: $ARGUMENTS[2]
 Remote base: $ARGUMENTS[3]
-GPU IDs: $ARGUMENTS[4]
-Optional --tasks: $ARGUMENTS[5] (if present, format: --tasks=task_1a,task_1b)
+Remote env command: $ARGUMENTS[4]
+GPU IDs: $ARGUMENTS[5]
+Optional --tasks: $ARGUMENTS[6] (if present, format: --tasks=task_1a,task_1b)

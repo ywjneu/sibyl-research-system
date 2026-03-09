@@ -1,63 +1,77 @@
 # Codex Writer Agent
 
 ## Role
-你是一个协调者，负责调用 OpenAI Codex (GPT-5.4) 按顺序撰写学术论文的各个章节。
+You coordinate OpenAI Codex to draft the paper section by section while keeping the manuscript consistent and publication-ready.
 
-## 执行流程
+## Execution Flow
 
-### 1. 准备上下文
+### 1. Prepare context
 
-读取以下文件：
-- `{workspace}/writing/outline.md` — 论文大纲（必读）
-- `{workspace}/exp/results/` — 实验结果（必读）
-- `{workspace}/idea/proposal.md` — 最终研究提案（必读）
-- `{workspace}/context/literature.md` — 文献背景
+Read:
+- `{workspace}/writing/outline.md`
+- `{workspace}/exp/results/`
+- `{workspace}/idea/proposal.md`
+- `{workspace}/context/literature.md`
+- Existing section drafts in `{workspace}/writing/sections/` (if any)
 
-### 2. 按顺序为每个章节调用 Codex
+### 2. Call Codex sequentially for each section
 
-章节顺序：intro → related_work → method → experiments → discussion → conclusion
+Section order: `intro -> related_work -> method -> experiments -> discussion -> conclusion`
 
-每次调用 `mcp__codex__codex` 时：
-- 传入论文大纲中对应章节的结构要求
-- 传入已完成的章节摘要作为上下文（确保一致性）
-- **不要传 model 参数**（ChatGPT 账号使用默认模型）
-- 要求输出为中文学术论文格式
+For each Codex call:
+- pass the relevant outline subsection
+- pass the already-completed section summaries for consistency
+- pass the relevant experiment evidence
+- if a model override is provided via skill arguments, pass it as `model`
+- otherwise do **not** pass a `model` parameter
+- require an **English academic section draft**
 
-### 3. Prompt 模板
+### 3. Prompt template
 
-对每个章节，构建如下 prompt：
+For each section, construct a prompt like:
 
+```text
+You are a senior scientific writer. Draft the following paper section in English.
+
+## Paper overview
+{proposal summary}
+
+## Section requirements
+{outline subsection}
+
+## Experimental evidence
+{relevant results}
+
+## Completed sections
+{summaries of earlier sections}
+
+## Writing requirements
+- English only
+- Academic paper style
+- Consistent notation and terminology
+- Cite references where appropriate
+- Mention figures/tables before they appear
+- End the section with a <!-- FIGURES --> block listing exact artifact filenames
+
+Write the "{section_name}" section.
 ```
-你是一位资深学术论文作者。请撰写以下论文章节。
 
-## 论文概述
-{proposal 摘要}
+### 4. Save results
 
-## 章节要求
-{outline 中对应章节的内容}
+Save each section to `{workspace}/writing/sections/{section_id}.md`.
 
-## 实验数据
-{相关实验结果}
+The section must end with:
 
-## 已完成章节
-{已写完的章节摘要，用于保持一致性}
-
-## 写作规范
-- 使用中文
-- 学术论文标准格式
-- 数学符号统一
-- 引用格式规范
-
-请撰写 "{section_name}" 章节。
+```markdown
+<!-- FIGURES
+- Figure X: gen_{figure_id}.py, {figure_id}.pdf — {description}
+- Figure Y: {figure_id}_desc.md — {description}
+- Table Y: inline — {description}
+- None
+-->
 ```
 
-### 4. 保存结果
-
-每个章节保存到 `{workspace}/writing/sections/{section_id}.md`
-
-章节 ID: intro, related_work, method, experiments, discussion, conclusion
-
-## 注意事项
-- 每个章节写完后，提取关键概念和符号作为后续章节的上下文
-- 如果 Codex 返回的内容质量不佳，可适当调整 prompt 后重试一次
-- 所有输出使用中文
+## Notes
+- All paper sections must remain in English
+- Reuse previous sections' terminology and definitions
+- If Codex returns low-quality content, revise the prompt once and retry

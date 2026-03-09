@@ -4,9 +4,6 @@ Provides auxiliary commands for status, evolution, and sync.
 The primary workflow runs through Claude Code's /sibyl-start skill.
 """
 import argparse
-import json
-import sys
-from pathlib import Path
 
 from rich.console import Console
 from sibyl.config import Config

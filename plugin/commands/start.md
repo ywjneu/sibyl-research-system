@@ -7,7 +7,7 @@ argument-hint: "<spec_path_or_topic>"
 
 启动研究项目并自动进入持续迭代循环。
 
-**所有用户可见的输出必须使用中文。**
+**所有用户可见的输出遵循项目语言配置（`action.language` / `config.language`）；论文正文与 LaTeX 始终使用英文。默认配置为中文。**
 
 工作目录: `$SIBYL_ROOT`
 
@@ -24,7 +24,7 @@ argument-hint: "<spec_path_or_topic>"
 
 ## 步骤
 
-0. **打印启动横幅**，格式如下（用中文输出）：
+0. **打印启动横幅**，格式如下（语言遵循项目配置，默认中文）：
 
 ```
 ╔═════════════════════════════════════════════════════════════════╗
@@ -120,7 +120,7 @@ LOOP:
      -> 返回 JSON: {action_type, skills, team, agents, description, stage, language}
 
   1.5. 设置语言环境变量（每轮都要执行）:
-       export SIBYL_LANGUAGE=<action.language>  (默认 "en")
+       export SIBYL_LANGUAGE=<action.language>  (默认 "zh")
        这控制 agent prompt 的语言版本。
 
   2. 根据 action_type 执行:
@@ -217,6 +217,11 @@ LOOP:
        |  System running, please wait...
        +-----------------------------------------+
        ```
+       如果 `action.gpu_poll.max_attempts > 0`：
+       - 必须尊重该上限，优先执行 `action.gpu_poll.script`
+       - script / 手工轮询达到上限后，调用
+         `.venv/bin/python3 -c "from sibyl.orchestrate import cli_pause; cli_pause('WORKSPACE_PATH', 'gpu_poll_timeout')"`
+       - 向用户明确报告 “GPU 轮询超时，项目已暂停，等待手动恢复或稍后 resume”
      "paused": 项目已暂停，每 5 分钟检查一次，最长等待 5 小时。
        每次检查时输出: "系统暂停中，等待恢复... (已等待 Xmin)"
      "done": 报告完成，输出 <promise>SIBYL_PIPELINE_COMPLETE</promise>。
@@ -239,7 +244,7 @@ LOOP:
            再为新迭代的各 stage 创建新 task 链（同"进度追踪"步骤 3-4）
 
      a. 阶段汇总:
-        - 用 1-3 句中文总结本阶段完成的工作和关键发现
+        - 用 1-3 句项目语言对应的语言总结本阶段完成的工作和关键发现
         - 如果是长上下文阶段（literature_search, idea_debate, experiment_*,
           writing_*, critique_*, review_*），将汇总写入阶段文档：
           写入 WORKSPACE_PATH/logs/stage_summaries/STAGE.md

@@ -8,9 +8,12 @@ Usage (called by Skill via Bash):
 """
 import json
 import re
+import shlex
 import time
 from pathlib import Path
 from dataclasses import dataclass, asdict
+
+import yaml
 
 from sibyl.config import Config
 from sibyl.workspace import Workspace
@@ -33,6 +36,149 @@ CHECKPOINT_DIRS = {
     "writing_sections": "writing/sections",
     "writing_critique": "writing/critique",
 }
+
+_FIGURES_BLOCK_RE = re.compile(
+    r"<!--\s*FIGURES\s*(.*?)-->",
+    re.IGNORECASE | re.DOTALL,
+)
+_FIGURE_ARTIFACT_RE = re.compile(
+    r"[\w./-]+\.(?:pdf|png|svg|py|md)",
+    re.IGNORECASE,
+)
+
+
+def extract_section_figure_artifacts(section_markdown: str) -> tuple[list[str], bool]:
+    """Extract figure-related artifact paths from a section's FIGURES block.
+
+    Returns:
+        (artifacts, has_figures_block)
+
+    The FIGURES block is expected to list exact artifact filenames, e.g.
+    `gen_method_overview.py, method_overview.pdf` or `pipeline_desc.md`.
+    Filenames without a directory are treated as relative to writing/figures/.
+    """
+    match = _FIGURES_BLOCK_RE.search(section_markdown)
+    if match is None:
+        return ([], False)
+
+    artifacts: list[str] = []
+    seen: set[str] = set()
+
+    for raw_line in match.group(1).splitlines():
+        line = raw_line.strip()
+        if not line.startswith("-"):
+            continue
+        if line.lower() in {"- none", "- no figures", "- no figure"}:
+            continue
+
+        artifact_part = line
+        if ":" in artifact_part:
+            artifact_part = artifact_part.split(":", 1)[1]
+        artifact_part = re.split(r"\s+—\s+|\s+-\s+", artifact_part, maxsplit=1)[0]
+
+        for artifact in _FIGURE_ARTIFACT_RE.findall(artifact_part):
+            rel_path = artifact if "/" in artifact else f"writing/figures/{artifact}"
+            if rel_path not in seen:
+                seen.add(rel_path)
+                artifacts.append(rel_path)
+
+    return (artifacts, True)
+
+
+def pack_skill_args(*parts: object) -> str:
+    """Pack positional skill args using shell-safe quoting.
+
+    Claude Code fork skills consume positional `$ARGUMENTS[n]`, so we keep a
+    fixed order but quote each part to preserve spaces safely.
+    """
+    return " ".join(
+        shlex.quote(str(part))
+        for part in parts
+        if part is not None and str(part) != ""
+    )
+
+
+def language_label(language: str) -> str:
+    """Return a human-readable language label for prompts."""
+    return "Chinese" if language == "zh" else "English"
+
+
+def non_paper_output_requirement(language: str) -> str:
+    """Prompt snippet for non-paper artifacts that follow config.language."""
+    return f"All non-paper output must be written in {language_label(language)}."
+
+
+def paper_writing_requirement() -> str:
+    """Prompt snippet for paper-related drafts, which are always English."""
+    return (
+        "All paper outlines, section drafts, critiques, integrated paper text, "
+        "and writing reviews must be written in English."
+    )
+
+
+def project_marker_file(project_name: str, suffix: str) -> str:
+    """Build a per-project marker file path under /tmp."""
+    safe_name = re.sub(r"[^a-zA-Z0-9_.-]+", "-", project_name).strip("-") or "sibyl"
+    return f"/tmp/sibyl_{safe_name}_{suffix}.json"
+
+
+def resolve_workspace_root(workspace_path: str | Path) -> Path:
+    """Normalize a workspace path to the stable project root."""
+    workspace_root = Path(workspace_path)
+    if workspace_root.name == "current" and (workspace_root.parent / "status.json").exists():
+        workspace_root = workspace_root.parent
+    return workspace_root.resolve()
+
+
+def load_workspace_iteration_dirs(workspace_path: str | Path, default: bool = False) -> bool:
+    """Read iteration_dirs from workspace status when available."""
+    status_path = resolve_workspace_root(workspace_path) / "status.json"
+    if not status_path.exists():
+        return default
+    try:
+        status_data = json.loads(status_path.read_text(encoding="utf-8"))
+        return bool(status_data.get("iteration_dirs", default))
+    except (json.JSONDecodeError, OSError, TypeError):
+        return default
+
+
+def resolve_active_workspace_path(workspace_path: str | Path) -> Path:
+    """Normalize a workspace path to the active iteration workspace."""
+    workspace_root = resolve_workspace_root(workspace_path)
+    if load_workspace_iteration_dirs(workspace_root):
+        current_path = workspace_root / "current"
+        if current_path.exists():
+            return current_path
+    return workspace_root
+
+
+def load_effective_config(
+    workspace_path: str | Path | None = None,
+    config_path: str | None = None,
+) -> Config:
+    """Load effective config with explicit path > project config > root config."""
+    if config_path:
+        return Config.from_yaml(config_path)
+
+    root_config = Path("config.yaml")
+    workspace_root = resolve_workspace_root(workspace_path) if workspace_path else None
+    project_config = workspace_root / "config.yaml" if workspace_root else None
+
+    if root_config.exists() and project_config and project_config.exists():
+        return Config.from_yaml_chain(str(root_config), str(project_config))
+    if project_config and project_config.exists():
+        return Config.from_yaml(str(project_config))
+    if root_config.exists():
+        return Config.from_yaml(str(root_config))
+    return Config()
+
+
+def write_project_config(ws: Workspace, config: Config):
+    """Persist the effective config into the workspace for stable future runs."""
+    ws.write_file(
+        "config.yaml",
+        yaml.safe_dump(config.to_dict(), allow_unicode=True, sort_keys=False),
+    )
 
 
 def load_prompt(agent_name: str, overlay_content: str | None = None) -> str:
@@ -65,10 +211,10 @@ def load_common_prompt() -> str:
     """Load the common instructions prompt in the configured language.
 
     Reads SIBYL_LANGUAGE env var (set by plugin commands from action.language).
-    Default "en" -> loads _common.md; "zh" -> loads _common_zh.md.
+    Default "zh" -> loads _common_zh.md; "en" -> loads _common.md.
     """
     import os
-    lang = os.environ.get("SIBYL_LANGUAGE", "en")
+    lang = os.environ.get("SIBYL_LANGUAGE", "zh")
     filename = "_common_zh" if lang == "zh" else "_common"
     return load_prompt(filename)
 
@@ -128,38 +274,36 @@ class FarsOrchestrator:
     ]
 
     def __init__(self, workspace_path: str, config: Config | None = None):
+        ws_path = resolve_workspace_root(Path(workspace_path).expanduser())
         if config is not None:
             self.config = config
         else:
-            # Load config: root config.yaml as base, project config overrides
-            root_config = Path("config.yaml")
-            project_config = Path(workspace_path) / "config.yaml"
-            if root_config.exists() and project_config.exists():
-                self.config = Config.from_yaml_chain(
-                    str(root_config), str(project_config))
-            elif project_config.exists():
-                self.config = Config.from_yaml(str(project_config))
-            elif root_config.exists():
-                self.config = Config.from_yaml(str(root_config))
-            else:
-                self.config = Config()
+            self.config = load_effective_config(ws_path)
+        iteration_dirs = load_workspace_iteration_dirs(ws_path, self.config.iteration_dirs)
         self.ws = Workspace(
-            self.config.workspaces_dir,
-            Path(workspace_path).name,
+            ws_path.parent,
+            ws_path.name,
+            iteration_dirs=iteration_dirs,
         )
-        self.workspace_path = str(self.ws.root)
+        self.project_path = str(self.ws.root)
+        self.workspace_path = str(self.ws.active_root)
 
     @classmethod
     def init_project(cls, topic: str, project_name: str | None = None,
                      config_path: str | None = None) -> dict:
         """Initialize a new research project. Returns project info."""
-        config = Config.from_yaml(config_path) if config_path else Config()
+        config = load_effective_config(config_path=config_path)
 
         if project_name is None:
             project_name = cls._slugify(topic)
 
-        ws = Workspace(config.workspaces_dir, project_name)
+        ws = Workspace(
+            config.workspaces_dir,
+            project_name,
+            iteration_dirs=config.iteration_dirs,
+        )
 
+        write_project_config(ws, config)
         ws.write_file("topic.txt", topic)
         ws.update_stage("init")
         ws.git_init()
@@ -178,6 +322,8 @@ class FarsOrchestrator:
                 "debate_rounds": config.debate_rounds,
                 "idea_exp_cycles": config.idea_exp_cycles,
                 "lark_enabled": config.lark_enabled,
+                "iteration_dirs": config.iteration_dirs,
+                "language": config.language,
             },
         }
 
@@ -195,8 +341,35 @@ class FarsOrchestrator:
         model = self.config.model_tiers.get(tier, self.config.model_tiers["standard"])
         return tier, model
 
+    def _control_plane_language_name(self) -> str:
+        """Return the current locale name for discussion/review artifacts."""
+        return "Chinese" if self.config.language == "zh" else "English"
+
+    def _non_paper_output_instruction(self) -> str:
+        """Language instruction for user-visible/non-paper artifacts."""
+        return non_paper_output_requirement(self.config.language)
+
+    @staticmethod
+    def _paper_output_instruction() -> str:
+        """Language instruction for paper-writing artifacts."""
+        return paper_writing_requirement()
+
+    def _codex_reviewer_args(self, mode: str, ws: str) -> str:
+        """Build reviewer args with an optional model override."""
+        if self.config.codex_model:
+            return pack_skill_args(mode, ws, self.config.codex_model)
+        return pack_skill_args(mode, ws)
+
+    def _codex_writer_args(self, ws: str) -> str:
+        """Build Codex writer args with an optional model override."""
+        model = self.config.codex_writing_model or self.config.codex_model
+        if model:
+            return pack_skill_args(ws, model)
+        return pack_skill_args(ws)
+
     def get_next_action(self) -> dict:
         """Determine and return the next action based on current state."""
+        self.workspace_path = str(self.ws.active_root)
         status = self.ws.get_status()
 
         # Check pause state
@@ -228,16 +401,25 @@ class FarsOrchestrator:
                       score: float | None = None):
         """Record the result of a completed stage and advance state.
 
-        Idempotent: if the stage has already been advanced past, this is a
-        no-op. This handles retries, duplicate calls, and interleaved stages
-        (e.g. lark_sync) that may have already been auto-advanced.
+        Idempotent for stale retries: if a stage has already been advanced
+        past, this is a no-op. Future-stage mismatches still raise so callers
+        do not accidentally mark the wrong stage as complete.
         """
         if stage == "done":
             raise ValueError("Cannot record result for terminal stage 'done'")
         current = self.ws.get_status().stage
         if stage != current:
-            # Already advanced past this stage — idempotent no-op
-            return
+            # Tolerate duplicate lark_sync after it was auto-advanced earlier.
+            if stage == "lark_sync":
+                return
+            try:
+                if self.STAGES.index(stage) < self.STAGES.index(current):
+                    return
+            except ValueError:
+                pass
+            raise ValueError(
+                f"Stage mismatch: recording '{stage}' but current is '{current}'"
+            )
 
         # Post-reflection hook: process reflection agent outputs
         if stage == "reflection":
@@ -390,7 +572,7 @@ class FarsOrchestrator:
         """Single fork skill performs literature search via arXiv + WebSearch."""
         return Action(
             action_type="skill",
-            skills=[{"name": "sibyl-literature", "args": f"{topic} {ws}"}],
+            skills=[{"name": "sibyl-literature", "args": pack_skill_args(topic, ws)}],
             description="文献调研：arXiv 搜索 + Web 搜索，建立领域现状基础",
             stage="literature_search",
         )
@@ -453,16 +635,17 @@ class FarsOrchestrator:
             f"Write critiques to {ws}/idea/debate/CRITIC_on_AUTHOR.md\n\n"
             f"Finally, synthesize all ideas and critiques into a final proposal at "
             f"{ws}/idea/proposal.md. Pick the strongest idea, incorporating feedback.\n\n"
-            f"All output in Chinese. Use Sonnet for teammates."
+            f"Run exactly {self.config.debate_rounds} critique rounds before final synthesis.\n"
+            f"{non_paper_output_requirement(self.config.language)} Use Sonnet for teammates."
         )
 
         all_teammates = [
-            {"name": "innovator", "skill": "sibyl-innovator", "args": f"{topic} {ws}"},
-            {"name": "pragmatist", "skill": "sibyl-pragmatist", "args": f"{topic} {ws}"},
-            {"name": "theoretical", "skill": "sibyl-theoretical", "args": f"{topic} {ws}"},
-            {"name": "contrarian", "skill": "sibyl-contrarian", "args": f"{topic} {ws}"},
-            {"name": "interdisciplinary", "skill": "sibyl-interdisciplinary", "args": f"{topic} {ws}"},
-            {"name": "empiricist", "skill": "sibyl-empiricist", "args": f"{topic} {ws}"},
+            {"name": "innovator", "skill": "sibyl-innovator", "args": pack_skill_args(topic, ws)},
+            {"name": "pragmatist", "skill": "sibyl-pragmatist", "args": pack_skill_args(topic, ws)},
+            {"name": "theoretical", "skill": "sibyl-theoretical", "args": pack_skill_args(topic, ws)},
+            {"name": "contrarian", "skill": "sibyl-contrarian", "args": pack_skill_args(topic, ws)},
+            {"name": "interdisciplinary", "skill": "sibyl-interdisciplinary", "args": pack_skill_args(topic, ws)},
+            {"name": "empiricist", "skill": "sibyl-empiricist", "args": pack_skill_args(topic, ws)},
         ]
         teammates = [t for t in all_teammates if t["name"] in remaining]
 
@@ -473,7 +656,7 @@ class FarsOrchestrator:
             post_steps.append({
                 "type": "codex",
                 "skill": "sibyl-codex-reviewer",
-                "args": f"idea_debate {ws}",
+                "args": self._codex_reviewer_args("idea_debate", ws),
             })
 
         team_dict = {
@@ -502,7 +685,7 @@ class FarsOrchestrator:
         )
         return Action(
             action_type="skill",
-            skills=[{"name": "sibyl-planner", "args": f"{ws} {pilot_config}"}],
+            skills=[{"name": "sibyl-planner", "args": pack_skill_args("plan", ws, pilot_config)}],
             description="Design experiment plan with pilot/full configs",
             stage="planning",
         )
@@ -536,7 +719,7 @@ class FarsOrchestrator:
         # --- GPU availability check (shared server) ---
         if self.config.gpu_poll_enabled:
             # Check if a previous poll found free GPUs
-            free_gpus = read_poll_result()
+            free_gpus = read_poll_result(project_marker_file(self.ws.name, "gpu_free"))
             if free_gpus is not None and len(free_gpus) > 0:
                 # Use polled free GPUs, capped by max_gpus
                 effective_gpu_ids = free_gpus[:self.config.max_gpus]
@@ -548,7 +731,7 @@ class FarsOrchestrator:
             effective_gpu_ids = list(range(self.config.max_gpus))
 
         # Validate task plan completeness before scheduling
-        task_plan_path = self.ws.root / "plan" / "task_plan.json"
+        task_plan_path = self.ws.active_path("plan/task_plan.json")
         if task_plan_path.exists():
             try:
                 plan = json.loads(task_plan_path.read_text(encoding="utf-8"))
@@ -563,7 +746,7 @@ class FarsOrchestrator:
                             action_type="skill",
                             skills=[{
                                 "name": "sibyl-planner",
-                                "args": f"fix-gpu {ws}",
+                                "args": pack_skill_args("fix-gpu", ws),
                             }],
                             description=(
                                 f"task_plan.json 中 {ids_str}{suffix} 缺少 gpu_count/estimated_minutes，"
@@ -575,7 +758,7 @@ class FarsOrchestrator:
                 pass
 
         info = get_batch_info(
-            self.ws.root, effective_gpu_ids, mode,
+            self.ws.active_root, effective_gpu_ids, mode,
             gpus_per_task=self.config.gpus_per_task,
         )
 
@@ -583,7 +766,7 @@ class FarsOrchestrator:
         if info is None:
             return self._experiment_skill(mode, ws, effective_gpu_ids, stage)
 
-        batch = info["batch"]
+        batch = info["batch"][:self.config.max_parallel_tasks]
 
         # All tasks blocked by deps (shouldn't happen with valid DAG)
         if len(batch) == 0:
@@ -627,7 +810,7 @@ class FarsOrchestrator:
             for tid in assignment["task_ids"]:
                 task_gpu_map[tid] = assignment["gpu_ids"]
                 all_task_ids.append(tid)
-        register_running_tasks(self.ws.root, task_gpu_map)
+        register_running_tasks(self.ws.active_root, task_gpu_map)
 
         # Build experiment monitor for background progress tracking
         monitor = self._build_experiment_monitor(all_task_ids, est_min)
@@ -646,21 +829,38 @@ class FarsOrchestrator:
                                 task_ids: str = "") -> dict:
         """Build a single experimenter skill dict."""
         gpu_ids_str = ",".join(str(g) for g in gpu_ids)
-        tasks_arg = f" --tasks={task_ids}" if task_ids else ""
+        env_cmd = self.config.get_remote_env_cmd(self.ws.name)
         if self.config.experiment_mode in ("server_codex", "server_claude"):
+            arg_parts = [
+                mode,
+                ws,
+                self.config.ssh_server,
+                self.config.remote_base,
+                env_cmd,
+                gpu_ids_str,
+                self.config.experiment_mode,
+                self.config.server_codex_path,
+                self.config.server_claude_path,
+            ]
+            if task_ids:
+                arg_parts.append(f"--tasks={task_ids}")
             return {
                 "name": "sibyl-server-experimenter",
-                "args": (
-                    f"{mode} {ws} {self.config.ssh_server} "
-                    f"{self.config.remote_base} {gpu_ids_str} "
-                    f"{self.config.experiment_mode} "
-                    f"{self.config.server_codex_path} "
-                    f"{self.config.server_claude_path}{tasks_arg}"
-                ),
+                "args": pack_skill_args(*arg_parts),
             }
+        arg_parts = [
+            mode,
+            ws,
+            self.config.ssh_server,
+            self.config.remote_base,
+            env_cmd,
+            gpu_ids_str,
+        ]
+        if task_ids:
+            arg_parts.append(f"--tasks={task_ids}")
         return {
             "name": "sibyl-experimenter",
-            "args": f"{mode} {ws} {self.config.ssh_server} {self.config.remote_base} {gpu_ids_str}{tasks_arg}",
+            "args": pack_skill_args(*arg_parts),
         }
 
     def _experiment_skill(self, mode: str, ws: str, gpu_ids: list[int],
@@ -691,9 +891,10 @@ class FarsOrchestrator:
         remote_dir = f"{self.config.remote_base}/projects/{project_name}"
         # Timeout = 2x estimated or minimum 30 min
         timeout_min = max(30, estimated_minutes * 2) if estimated_minutes > 0 else 0
+        timeout_min = max(timeout_min, max(1, self.config.experiment_timeout // 60))
         # Poll every 5 min (or 2 min for short tasks)
         poll_sec = 120 if estimated_minutes <= 15 else 300
-        marker = "/tmp/sibyl_exp_monitor.json"
+        marker = project_marker_file(project_name, "exp_monitor")
 
         script = experiment_monitor_script(
             ssh_server=self.config.ssh_server,
@@ -717,16 +918,16 @@ class FarsOrchestrator:
             "timeout_minutes": timeout_min,
             "poll_interval_sec": poll_sec,
             # SSH MCP polling fields
-            "ssh_connection": "default",
+            "ssh_connection": self.config.ssh_server,
             "check_cmd": done_checks,
             "remote_dir": remote_dir,
             # Dynamic dispatch: when a task completes, dispatch next queued task
             "dynamic_dispatch": True,
             "dispatch_cmd": (
-                f'cd {Path(self.workspace_path).parent.parent} && '
+                f'cd {Path(__file__).resolve().parent.parent} && '
                 f'.venv/bin/python3 -c "'
                 f"from sibyl.orchestrate import cli_dispatch_tasks; "
-                f"cli_dispatch_tasks('{self.workspace_path}')\""
+                f"cli_dispatch_tasks({self.workspace_path!r})\""
             ),
         }
 
@@ -734,32 +935,46 @@ class FarsOrchestrator:
         """Return a gpu_poll action for the main session to execute.
 
         The main session should:
-        1. Use SSH MCP (execute-command) to run the query_cmd on ssh_connection
-        2. Call parse_free_gpus() with the output to find free GPUs
-        3. If free GPUs found: write marker_file and re-call cli_next()
-        4. If no free GPUs: sleep interval_sec, then repeat from step 1
-        5. Loop indefinitely (no max attempts) until GPUs become available
+        1. Prefer executing the provided script verbatim; it already honors
+           interval_sec, aggressive mode, and max_attempts consistently.
+        2. If implementing the loop manually, run query_cmd via ssh_connection,
+           parse free GPUs, and stop after max_attempts when non-zero.
+        3. If free GPUs are found, write marker_file and re-call cli_next().
+        4. If polling times out, pause the project instead of looping forever.
         """
-        from sibyl.gpu_scheduler import nvidia_smi_query_cmd
+        from sibyl.gpu_scheduler import nvidia_smi_query_cmd, gpu_poll_wait_script
         aggressive = self.config.gpu_aggressive_mode
         interval_min = self.config.gpu_poll_interval_sec // 60
+        marker_file = project_marker_file(self.ws.name, "gpu_free")
         mode_desc = (f"（流氓模式：<{self.config.gpu_aggressive_threshold_pct}% 显存占用也抢）"
                      if aggressive else "")
         return Action(
             action_type="gpu_poll",
             gpu_poll={
-                "ssh_connection": "default",
+                "ssh_connection": self.config.ssh_server,
                 "query_cmd": nvidia_smi_query_cmd(include_total=aggressive),
+                "script": gpu_poll_wait_script(
+                    ssh_server=self.config.ssh_server,
+                    candidate_gpu_ids=list(range(self.config.max_gpus)),
+                    threshold_mb=self.config.gpu_free_threshold_mb,
+                    poll_interval_sec=self.config.gpu_poll_interval_sec,
+                    max_polls=self.config.gpu_poll_max_attempts,
+                    marker_file=marker_file,
+                    aggressive_mode=aggressive,
+                    aggressive_threshold_pct=self.config.gpu_aggressive_threshold_pct,
+                ),
                 "max_gpus": self.config.max_gpus,
                 "threshold_mb": self.config.gpu_free_threshold_mb,
                 "interval_sec": self.config.gpu_poll_interval_sec,
-                "marker_file": "/tmp/sibyl_gpu_free.json",
+                "marker_file": marker_file,
                 "aggressive_mode": aggressive,
                 "aggressive_threshold_pct": self.config.gpu_aggressive_threshold_pct,
+                "max_attempts": self.config.gpu_poll_max_attempts,
             },
             description=(
                 f"轮询等待空闲 GPU（最多 {self.config.max_gpus} 张，"
-                f"每 {interval_min}min 通过 SSH MCP 检查，无限等待）{mode_desc}"
+                f"每 {interval_min}min 通过 SSH MCP 检查，"
+                f"{'无限等待' if self.config.gpu_poll_max_attempts == 0 else f'最多 {self.config.gpu_poll_max_attempts} 次'}）{mode_desc}"
             ),
             stage=stage,
         )
@@ -803,7 +1018,8 @@ class FarsOrchestrator:
             f"discussion in external context. The revisionist updates our mental model. "
             f"The strategist synthesizes into actionable next steps.\n\n"
             f"Each teammate writes analysis to {ws}/idea/result_debate/ROLE.md\n"
-            f"All output in Chinese."
+            f"Run exactly {self.config.debate_rounds} debate rounds before the strategist synthesizes the final view.\n"
+            f"{non_paper_output_requirement(self.config.language)}"
         )
 
         all_teammates = [
@@ -823,7 +1039,7 @@ class FarsOrchestrator:
             post_steps.append({
                 "type": "codex",
                 "skill": "sibyl-codex-reviewer",
-                "args": f"result_debate {ws}",
+                "args": self._codex_reviewer_args("result_debate", ws),
             })
 
         team_dict = {
@@ -890,7 +1106,7 @@ class FarsOrchestrator:
         elif mode == "codex":
             return Action(
                 action_type="skill",
-                skills=[{"name": "sibyl-codex-writer", "args": ws}],
+                skills=[{"name": "sibyl-codex-writer", "args": self._codex_writer_args(ws)}],
                 description="使用 Codex (GPT-5) 撰写论文各章节",
                 stage="writing_sections",
                 checkpoint_info=cp_info,
@@ -910,13 +1126,13 @@ class FarsOrchestrator:
                 f"Spawn teammates for remaining sections:\n{sections_info}\n\n"
                 f"Teammates should coordinate for consistency — share key definitions, "
                 f"notation, and cross-references between sections.\n"
-                f"All writing in Chinese."
+                f"{paper_writing_requirement()}"
             )
             teammates = [
                 {
                     "name": f"writer-{sid}",
                     "skill": "sibyl-section-writer",
-                    "args": f"{ws} {sid} {name}",
+                    "args": pack_skill_args(name, sid, ws),
                 }
                 for sid, name in PAPER_SECTIONS
                 if remaining is None or sid in remaining
@@ -964,13 +1180,13 @@ class FarsOrchestrator:
             f"Spawn teammates for remaining critiques:\n{sections_info}\n\n"
             f"Critics should cross-reference other sections for consistency issues. "
             f"Score each section 1-10 and provide specific improvement suggestions.\n"
-            f"All output in Chinese."
+            f"{paper_writing_requirement()}"
         )
         teammates = [
             {
                 "name": f"critic-{sid}",
                 "skill": "sibyl-section-critic",
-                "args": f"{ws} {sid} {name}",
+                "args": pack_skill_args(name, sid, ws),
             }
             for sid, name in PAPER_SECTIONS
             if remaining is None or sid in remaining
@@ -1012,7 +1228,7 @@ class FarsOrchestrator:
             action_type="skill",
             skills=[{
                 "name": "sibyl-latex-writer",
-                "args": f"{ws} {self.config.ssh_server} {self.config.remote_base}",
+                "args": pack_skill_args(ws, self.config.ssh_server, self.config.remote_base),
             }],
             description="将论文转为 NeurIPS LaTeX 格式并编译 PDF",
             stage="writing_latex",
@@ -1025,7 +1241,7 @@ class FarsOrchestrator:
             {"name": "sibyl-supervisor", "args": ws},
         ]
         if self.config.codex_enabled:
-            skills.append({"name": "sibyl-codex-reviewer", "args": f"review {ws}"})
+            skills.append({"name": "sibyl-codex-reviewer", "args": self._codex_reviewer_args("review", ws)})
         return Action(
             action_type="skills_parallel",
             skills=skills,
@@ -1036,7 +1252,7 @@ class FarsOrchestrator:
     def _action_reflection(self, ws: str, iteration: int) -> Action:
         return Action(
             action_type="skill",
-            skills=[{"name": "sibyl-reflection", "args": f"{ws} {iteration}"}],
+            skills=[{"name": "sibyl-reflection", "args": pack_skill_args(ws, iteration)}],
             description="Reflection agent: classify issues, generate improvement plan and lessons",
             stage="reflection",
         )
@@ -1238,7 +1454,7 @@ class FarsOrchestrator:
                     )
                 else:
                     # Clear stale diagnostics if system is healthy
-                    diag_path = self.ws.root / "logs" / "self_check_diagnostics.json"
+                    diag_path = self.ws.project_path("logs/self_check_diagnostics.json")
                     if diag_path.exists():
                         diag_path.unlink()
         except Exception as e:
@@ -1350,11 +1566,11 @@ class FarsOrchestrator:
             from sibyl.gpu_scheduler import get_batch_info, get_running_gpu_ids
             exp_mode = "PILOT" if current_stage == "pilot_experiments" else "FULL"
             # Check if any tasks are still running
-            running_gpus = get_running_gpu_ids(self.ws.root)
+            running_gpus = get_running_gpu_ids(self.ws.active_root)
             if running_gpus:
                 return (current_stage, None)  # wait for running tasks
             info = get_batch_info(
-                self.ws.root, list(range(self.config.max_gpus)), exp_mode,
+                self.ws.active_root, list(range(self.config.max_gpus)), exp_mode,
                 gpus_per_task=self.config.gpus_per_task,
             )
             if info is not None and len(info["batch"]) > 0:
@@ -1365,7 +1581,7 @@ class FarsOrchestrator:
             review = self.ws.read_file("writing/review.md") or ""
             match = re.search(r"SCORE:\s*(\d+(?:\.\d+)?)", review, re.IGNORECASE)
             review_score = float(match.group(1)) if match else 5.0
-            critique_dir = self.ws.root / "writing/critique"
+            critique_dir = self.ws.active_path("writing/critique")
             if critique_dir.exists():
                 revision_rounds = len([
                     f for f in critique_dir.iterdir()
@@ -1388,6 +1604,9 @@ class FarsOrchestrator:
         # lark stages: skip if lark disabled (direct pipeline path)
         if current_stage == "reflection" and not self.config.lark_enabled:
             return ("quality_gate", None)
+
+        if current_stage == "writing_latex" and not self.config.review_enabled:
+            return ("reflection", None)
 
         # quality_gate: execute side effects and determine next stage
         if current_stage == "quality_gate":
@@ -1433,13 +1652,13 @@ class FarsOrchestrator:
         import shutil
 
         # Preserve lessons_learned.md before clearing reflection/
-        lessons_path = self.ws.root / "reflection" / "lessons_learned.md"
+        lessons_path = self.ws.active_path("reflection/lessons_learned.md")
         lessons_content = None
         if lessons_path.exists():
             lessons_content = lessons_path.read_text(encoding="utf-8")
 
         # Preserve action_plan.json for issues_fixed tracking
-        action_plan_path = self.ws.root / "reflection" / "action_plan.json"
+        action_plan_path = self.ws.active_path("reflection/action_plan.json")
         action_plan_content = None
         if action_plan_path.exists():
             action_plan_content = action_plan_path.read_text(encoding="utf-8")
@@ -1451,7 +1670,7 @@ class FarsOrchestrator:
             "supervisor", "critic", "reflection",
         ]
         for subdir in dirs_to_clear:
-            target = self.ws.root / subdir
+            target = self.ws.active_path(subdir)
             if target.exists():
                 try:
                     shutil.rmtree(target)
@@ -1459,14 +1678,14 @@ class FarsOrchestrator:
                 except OSError:
                     pass  # best-effort cleanup
         # Clear GPU progress tracking
-        gpu_progress = self.ws.root / "exp" / "gpu_progress.json"
+        gpu_progress = self.ws.active_path("exp/gpu_progress.json")
         if gpu_progress.exists():
             try:
                 gpu_progress.unlink()
             except OSError:
                 pass
         # Clear PIVOT cycle markers (per-iteration budget)
-        logs_dir = self.ws.root / "logs"
+        logs_dir = self.ws.project_path("logs")
         if logs_dir.exists():
             for marker in logs_dir.glob("idea_exp_cycle_*.marker"):
                 try:
@@ -1486,7 +1705,7 @@ class FarsOrchestrator:
 
     def _get_current_cycle(self) -> int:
         """Get current idea-experiment cycle number."""
-        logs_dir = self.ws.root / "logs"
+        logs_dir = self.ws.project_path("logs")
         if not logs_dir.exists():
             return 0
         return len(list(logs_dir.glob("idea_exp_cycle_*.marker")))
@@ -1553,8 +1772,36 @@ def cli_checkpoint(workspace_path: str, stage: str, step_id: str):
         return
     ws_path = Path(workspace_path)
     ws = Workspace(ws_path.parent, ws_path.name)
-    ws.complete_checkpoint_step(cp_dir, step_id)
-    print(json.dumps({"status": "ok", "stage": stage, "step": step_id}))
+    artifacts: list[str] | None = None
+    has_figures_block = True
+    if stage == "writing_sections":
+        section_md = ws.read_file(f"writing/sections/{step_id}.md") or ""
+        artifacts, has_figures_block = extract_section_figure_artifacts(section_md)
+        if not has_figures_block:
+            artifacts = None
+
+    result = ws.complete_checkpoint_step(
+        cp_dir,
+        step_id,
+        artifacts=artifacts,
+        require_artifacts_metadata=(stage == "writing_sections"),
+    )
+
+    payload = {
+        "status": "ok",
+        "stage": stage,
+        "step": step_id,
+        "completed": result["completed"],
+    }
+    if stage == "writing_sections" and not has_figures_block:
+        payload["message"] = (
+            "section 缺少 <!-- FIGURES --> block，checkpoint 未标记完成"
+        )
+    elif not result["completed"]:
+        payload["message"] = "checkpoint 未标记完成，请补齐缺失产物后重试"
+    if result["missing_files"]:
+        payload["missing_files"] = result["missing_files"]
+    print(json.dumps(payload))
 
 
 def cli_experiment_status(workspace_path: str = ""):
@@ -1575,18 +1822,20 @@ def cli_experiment_status(workspace_path: str = ""):
     import datetime as _dt
     from sibyl.gpu_scheduler import read_monitor_result, _load_progress
 
-    monitor = read_monitor_result()
-    result = dict(monitor) if monitor else {"status": "no_monitor"}
-
     if not workspace_path:
+        monitor = read_monitor_result()
+        result = dict(monitor) if monitor else {"status": "no_monitor"}
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return
 
-    ws_root = Path(workspace_path)
-    completed, running_ids, running_map, timings = _load_progress(ws_root)
+    project_root = resolve_workspace_root(workspace_path)
+    active_root = resolve_active_workspace_path(workspace_path)
+    monitor = read_monitor_result(project_marker_file(project_root.name, "exp_monitor"))
+    result = dict(monitor) if monitor else {"status": "no_monitor"}
+    completed, running_ids, running_map, timings = _load_progress(active_root)
 
     # Task plan info
-    task_plan_path = ws_root / "plan" / "task_plan.json"
+    task_plan_path = active_root / "plan" / "task_plan.json"
     total_tasks = 0
     task_names: dict[str, str] = {}
     task_estimates: dict[str, int] = {}
@@ -1723,15 +1972,17 @@ def cli_dispatch_tasks(workspace_path: str):
         return
 
     mode = "PILOT" if stage == "pilot_experiments" else "FULL"
+    active_root = o.ws.active_root
+    active_workspace = str(active_root)
 
     # Determine available GPUs: all configured minus occupied by running tasks
     if o.config.gpu_poll_enabled:
-        polled = read_poll_result()
+        polled = read_poll_result(project_marker_file(o.ws.name, "gpu_free"))
         all_gpu_ids = polled if polled else list(range(o.config.max_gpus))
     else:
         all_gpu_ids = list(range(o.config.max_gpus))
 
-    occupied = set(get_running_gpu_ids(o.ws.root))
+    occupied = set(get_running_gpu_ids(active_root))
     free_gpus = [g for g in all_gpu_ids if g not in occupied]
 
     if not free_gpus:
@@ -1739,7 +1990,7 @@ def cli_dispatch_tasks(workspace_path: str):
         return
 
     info = get_batch_info(
-        o.ws.root, free_gpus, mode,
+        active_root, free_gpus, mode,
         gpus_per_task=o.config.gpus_per_task,
     )
 
@@ -1757,7 +2008,7 @@ def cli_dispatch_tasks(workspace_path: str):
     for assignment in batch:
         for tid in assignment["task_ids"]:
             task_gpu_map[tid] = assignment["gpu_ids"]
-    register_running_tasks(o.ws.root, task_gpu_map)
+    register_running_tasks(active_root, task_gpu_map)
 
     # Build skill dicts for each assignment
     skills = []
@@ -1765,7 +2016,7 @@ def cli_dispatch_tasks(workspace_path: str):
         task_ids = ",".join(assignment["task_ids"])
         gpu_ids = assignment["gpu_ids"]
         skills.append(
-            o._experiment_skill_dict(mode, workspace_path, gpu_ids, task_ids)
+            o._experiment_skill_dict(mode, active_workspace, gpu_ids, task_ids)
         )
 
     gpu_summary = ", ".join(
@@ -1800,8 +2051,13 @@ def cli_list_projects(workspaces_dir: str = "workspaces"):
 
 def cli_init_spec(project_name: str, config_path: str | None = None):
     """CLI: Initialize a project directory for spec editing."""
-    config = Config.from_yaml(config_path) if config_path else Config()
-    ws = Workspace(config.workspaces_dir, project_name)
+    config = load_effective_config(config_path=config_path)
+    ws = Workspace(
+        config.workspaces_dir,
+        project_name,
+        iteration_dirs=config.iteration_dirs,
+    )
+    write_project_config(ws, config)
 
     # Create spec template
     spec_template = f"""# 项目: {project_name}
@@ -1852,19 +2108,33 @@ def cli_init_from_spec(spec_path: str, config_path: str | None = None):
 
     spec_content = spec_file.read_text(encoding="utf-8")
 
-    # Extract project name from path or spec
-    # Try to get from parent directory name if in workspaces/
-    if spec_file.parent.parent.name == "workspaces" or "workspaces" in str(spec_file):
-        project_name = spec_file.parent.name
+    existing_workspace_root = resolve_workspace_root(spec_file.parent)
+    if spec_file.name == "spec.md" and (existing_workspace_root / "status.json").exists():
+        project_name = existing_workspace_root.name
+        config = load_effective_config(
+            workspace_path=existing_workspace_root,
+            config_path=config_path,
+        )
+        iteration_dirs = load_workspace_iteration_dirs(
+            existing_workspace_root,
+            config.iteration_dirs,
+        )
+        ws = Workspace(
+            existing_workspace_root.parent,
+            existing_workspace_root.name,
+            iteration_dirs=iteration_dirs,
+        )
     else:
-        # Extract from spec header
         match = re.search(r'^#\s*(?:Project|项目):\s*(.+)', spec_content, re.MULTILINE)
         project_name = match.group(1).strip() if match else spec_file.stem
-
-    project_name = FarsOrchestrator._slugify(project_name)
-    config = Config.from_yaml(config_path) if config_path else Config()
-
-    ws = Workspace(config.workspaces_dir, project_name)
+        project_name = FarsOrchestrator._slugify(project_name)
+        config = load_effective_config(config_path=config_path)
+        ws = Workspace(
+            config.workspaces_dir,
+            project_name,
+            iteration_dirs=config.iteration_dirs,
+        )
+    write_project_config(ws, config)
 
     # Extract topic from spec
     topic_match = re.search(r'##\s*(?:Topic|研究主题)\s*\n+(.+?)(?:\n\n|\n##)', spec_content, re.DOTALL)

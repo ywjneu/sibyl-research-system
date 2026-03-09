@@ -22,7 +22,7 @@ Tasks:
 Before finalizing, perform a comprehensive visual audit:
 
 ### Completeness Check
-- Parse `<!-- FIGURES -->` blocks from each section
+- Parse `<!-- FIGURES -->` blocks from each section（其中会列出精确 artifact 文件名）
 - Cross-reference with the Figure & Table Plan in `{workspace}/writing/outline.md`
 - Verify every planned figure/table is present in the manuscript
 - Flag any missing visuals and add placeholders with `[TODO: Figure X]`

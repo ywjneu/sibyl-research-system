@@ -103,7 +103,7 @@
 ```
 
 ### `{workspace}/reflection/lessons_learned.md`
-给下次迭代所有 agent 看的简明教训（中文），格式：
+给下次迭代所有 agent 看的简明教训（遵循当前控制面语言），格式：
 ```markdown
 # 本轮迭代教训
 

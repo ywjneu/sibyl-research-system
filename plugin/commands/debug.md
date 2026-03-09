@@ -7,7 +7,7 @@ argument-hint: "<spec_path_or_project_name>"
 
 Debug 模式：单步执行编排循环，不启动 Ralph Loop，方便调试和修复问题。
 
-**所有用户可见的输出必须使用中文。**
+**所有用户可见的输出遵循项目语言配置（`action.language` / `config.language`）；论文正文与 LaTeX 始终使用英文。默认配置为中文。**
 
 工作目录: 项目根目录（通过 $SIBYL_ROOT 或 cd 到 clone 位置）
 
@@ -135,7 +135,7 @@ cd $SIBYL_ROOT && .venv/bin/python3 -c "from sibyl.orchestrate import cli_record
 
    a0. **更新进度 Task**：TaskUpdate(taskId=步骤1.5创建的taskId, status="completed")。
 
-   a. **阶段汇总**：用 1-3 句中文总结本阶段完成的工作和关键发现。
+   a. **阶段汇总**：用 1-3 句项目语言对应的语言总结本阶段完成的工作和关键发现。
       如果是长上下文阶段（literature_search, idea_debate, experiment_*,
       writing_*, critique_*, review_*），将汇总写入阶段文档：
       写入 WORKSPACE_PATH/logs/stage_summaries/STAGE.md

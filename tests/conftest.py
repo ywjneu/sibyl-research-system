@@ -1,6 +1,4 @@
 """Shared fixtures for Sibyl tests."""
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -33,8 +31,9 @@ def make_orchestrator(tmp_path):
 
         o = FarsOrchestrator.__new__(FarsOrchestrator)
         o.config = config
-        o.ws = Workspace(tmp_path, "test-proj")
-        o.workspace_path = str(o.ws.root)
+        o.ws = Workspace(tmp_path, "test-proj", iteration_dirs=config.iteration_dirs)
+        o.project_path = str(o.ws.root)
+        o.workspace_path = str(o.ws.active_root)
         o.ws.write_file("topic.txt", "test research topic")
         o.ws.update_stage(stage)
         if iteration > 0:

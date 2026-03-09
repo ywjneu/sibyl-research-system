@@ -1,10 +1,19 @@
-from dataclasses import dataclass, field
+import os
+import tempfile
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 import yaml
 
 
 @dataclass
 class AgentConfig:
+    """Reserved per-phase model config kept for backward compatibility.
+
+    The current Claude Code runtime routes models through `.claude/agents`
+    plus `model_tiers` / `agent_tier_map`. These nested blocks are parsed and
+    persisted so older configs continue to load cleanly, but they are not the
+    primary runtime control surface.
+    """
     model: str = "claude-opus-4-6"
     max_tokens: int = 64000
     temperature: float = 0.7
@@ -13,6 +22,8 @@ class AgentConfig:
 @dataclass
 class Config:
     workspaces_dir: Path = Path("workspaces")
+    # Reserved compatibility blocks; current runtime model routing is controlled
+    # by `.claude/agents` and model_tiers/agent_tier_map instead.
     ideation: AgentConfig = field(default_factory=lambda: AgentConfig(temperature=0.9))
     planning: AgentConfig = field(default_factory=AgentConfig)
     experiment: AgentConfig = field(default_factory=lambda: AgentConfig(temperature=0.3))
@@ -22,8 +33,9 @@ class Config:
     experiment_timeout: int = 300
     review_enabled: bool = True
 
-    # Language for user-facing agent output ("en" or "zh")
-    language: str = "en"
+    # Language for user-facing / non-paper agent output ("en" or "zh")
+    # Paper-writing artifacts remain English regardless of this setting.
+    language: str = "zh"
 
     # GPU scheduling
     max_gpus: int = 4  # max GPUs to use (picks any free ones, not fixed IDs)
@@ -177,7 +189,6 @@ class Config:
                 else:
                     merged[key] = val
         # Write merged data to a temp structure and reuse from_yaml logic
-        import tempfile, os
         fd, tmp = tempfile.mkstemp(suffix=".yaml")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -192,3 +203,13 @@ class Config:
             return f"source {self.remote_base}/projects/{project_name}/.venv/bin/activate &&"
         conda = self.remote_conda_path or f"{self.remote_base}/miniconda3/bin/conda"
         return f"{conda} run --no-banner -n sibyl_{project_name}"
+
+    def to_dict(self) -> dict:
+        """Serialize config for persisting into a project workspace."""
+        data = asdict(self)
+        data["workspaces_dir"] = str(self.workspaces_dir)
+        return data
+
+    def to_yaml(self) -> str:
+        """Serialize config as YAML for workspace/config.yaml snapshots."""
+        return yaml.safe_dump(self.to_dict(), allow_unicode=True, sort_keys=False)

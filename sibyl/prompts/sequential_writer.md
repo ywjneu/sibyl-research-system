@@ -128,4 +128,16 @@ FIG_WIDTH_FULL = 12.0  # inches, full width
 - 所有写作使用英文（per _common.md language requirement）
 - 每个章节独立保存为一个文件
 - 可视化脚本保存到 `{workspace}/writing/figures/`
-- 章节末尾列出本章包含的 figure/table 清单
+- 每个章节末尾必须附上 `<!-- FIGURES -->` block，列出本章所有 visual artifact 的精确文件名
+- block 格式如下：
+```markdown
+<!-- FIGURES
+- Figure X: gen_{figure_id}.py, {figure_id}.pdf — {description}
+- Figure Y: {figure_id}_desc.md — {description}
+- Table Y: inline — {description}
+- None
+-->
+```
+- code 生成的 figure 必须同时列出 `gen_{figure_id}.py` 和 `{figure_id}.pdf`
+- 架构图/流程图必须列出 `{figure_id}_desc.md`
+- 如果该章节没有图表，也必须保留这个 block，并写 `- None`

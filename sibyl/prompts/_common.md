@@ -2,27 +2,32 @@
 
 ## Language Requirement (CRITICAL)
 
-**All output MUST be written in English.** This applies to everything the user sees and all files produced.
+Use **English** as the control-plane locale for this run.
 
-### Console output (status messages, progress logs, skill invocation summaries)
+### Locale-bound outputs (must be in English)
 - All messages printed to the user during execution MUST be in English
 - Stage transition announcements, error messages, and status updates — English
-
-### Research artifacts
 - Research proposals (proposal.md), hypotheses, alternatives
 - Experiment reports, result analysis, and execution logs
 - Research diary (research_diary.md) and stage summaries
-- Paper outlines, section drafts, review comments, and critique
 - Discussions, conclusions, error reports, and suggestions
-- All intermediate artifacts and log files
+- Review comments, critique, and reflection notes
+
+### Always write these in English regardless of locale
+- Paper planning and drafts: `writing/outline.md`, `writing/sections/*.md`, `writing/paper.md`
+- Writing-chain review artifacts: `writing/critique/*`, `writing/review.md`
+- LaTeX outputs: `writing/latex/*`
+- Code and code comments
+- JSON structure keys
+- References and citations
+- Table/figure captions, labels, and manuscript text
 
 ### Code and data
-- Code and code comments
-- JSON data structure keys and values
-- Technical terms, references, and citations
+- Prefer English technical terms and identifiers
 
-### Papers
-- Papers (paper.md, LaTeX sources) — always in English
+### Notes
+- Do not translate an already-English paper draft back into another language
+- If a prior file is in the wrong language, normalize it to the rules above when editing
 
 ## Workspace Conventions
 
@@ -95,7 +100,7 @@ All research outputs are stored in the shared workspace directory. Use Read and 
 - All remote files must reside within `{remote_base}/`
 - Project files are restricted to `{remote_base}/projects/{project}/`
 - Shared datasets/pretrained weights go in `{remote_base}/shared/`; check `{remote_base}/shared/registry.json` before downloading
-- Use `{env_cmd}` for environment activation (conda or venv, per project config)
+- Use the remote environment command provided by the invoking skill/action for activation (conda or venv, per project config)
 - Do not access other projects' directories
 
 ## Iteration Management

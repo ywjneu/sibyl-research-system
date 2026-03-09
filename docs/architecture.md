@@ -127,7 +127,7 @@ On shared servers, before each experiment batch:
 1. Orchestrator returns `action_type: "gpu_poll"`
 2. Main session SSH queries `nvidia-smi` on the server
 3. `parse_free_gpus()` identifies available GPUs
-4. Results written to `/tmp/sibyl_gpu_free.json`
+4. Results written to a project-scoped marker such as `/tmp/sibyl_<project>_gpu_free.json`
 5. Next `cli_next()` reads the marker and assigns tasks
 
 ## Self-Evolution Engine

@@ -7,7 +7,7 @@ argument-hint: "<project>"
 
 迁移服务器端旧项目数据到 v5 结构。
 
-**所有用户可见的输出必须使用中文。**
+**所有用户可见的输出遵循项目语言配置（`action.language` / `config.language`）；论文正文与 LaTeX 始终使用英文。默认配置为中文。**
 
 参数: `$ARGUMENTS`（项目名称）
 

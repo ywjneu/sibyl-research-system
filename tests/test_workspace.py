@@ -1,7 +1,5 @@
 """Tests for sibyl.workspace module."""
 import json
-import time
-from pathlib import Path
 
 import pytest
 
@@ -254,6 +252,17 @@ class TestIterationDirs:
         assert (ws.root / "iter_002" / "context" / "references.json").read_text(encoding="utf-8") == "[]"
         # Lessons should be copied from prev iteration
         assert (ws.root / "iter_002" / "reflection" / "lessons_learned.md").read_text(encoding="utf-8") == "lesson 1"
+
+    def test_reopen_preserves_current_iteration_target(self, tmp_path):
+        ws = Workspace(tmp_path, "iter-proj", iteration_dirs=True)
+        ws.start_new_iteration(2)
+        ws.update_iteration(2)
+
+        reopened = Workspace(tmp_path, "iter-proj", iteration_dirs=True)
+
+        assert (reopened.root / "current").is_symlink()
+        assert (reopened.root / "current").resolve() == (reopened.root / "iter_002").resolve()
+        assert reopened.active_root.resolve() == (reopened.root / "iter_002").resolve()
 
     def test_archive_iteration_dirs_mode(self, tmp_path):
         ws = Workspace(tmp_path, "iter-proj", iteration_dirs=True)

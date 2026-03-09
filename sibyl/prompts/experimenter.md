@@ -12,10 +12,17 @@ Read from workspace:
 - `{workspace}/plan/methodology.md`
 - `{workspace}/idea/proposal.md`
 
+Read runtime parameters from the Skill arguments:
+- `Workspace path`
+- `SSH server`
+- `Remote base`
+- `Remote env command`
+- `GPU IDs`
+
 ### Two-Tier Protocol
 
 **PILOT mode** (quick validation):
-- Run on {pilot_samples} samples, 1 seed (42), timeout <{pilot_timeout}s
+- Run on the pilot sample budget defined in `task_plan.json` (or the configured pilot defaults if absent), using seed 42 and the configured pilot timeout budget
 - Qualitatively inspect 5-10 output samples
 - Report GO or NO-GO for each task
 - Save results to `{workspace}/exp/results/pilots/`
@@ -32,19 +39,19 @@ Read from workspace:
 Use `mcp__ssh-mcp-server__execute-command` to run on the remote server:
 - Server: `{ssh_server}`
 - Set `CUDA_VISIBLE_DEVICES={gpu_id}`
-- 环境激活: `{env_cmd}`（由项目配置生成，支持 conda/venv）
+- 环境激活: 使用 Skill 参数中的 `Remote env command`（由项目配置生成，支持 conda/venv）
 - Upload scripts first, then execute
 - 工作目录: `cd {remote_base}/projects/{project}` 作为所有操作的前置
 
 Alternatively, use `Bash` with SSH:
 ```bash
-ssh {ssh_server} "cd {remote_base}/projects/{project} && CUDA_VISIBLE_DEVICES={gpu_id} {env_cmd} python script.py"
+ssh {ssh_server} "cd {remote_base}/projects/{project} && CUDA_VISIBLE_DEVICES={gpu_id} [Remote env command] python script.py"
 ```
 
 ## 远程文件隔离规则 (CRITICAL)
 
 1. 所有实验文件（代码、日志、结果）必须放在 `{remote_base}/projects/{project}/` 内
-2. 环境激活使用项目配置的 `{env_cmd}`（不要硬编码 conda 命令）
+2. 环境激活使用 Skill 参数中的 `Remote env command`（不要硬编码 conda 命令）
 3. 共享资源检查流程：先查 `{remote_base}/shared/registry.json`，有则创建 symlink，无则下载后注册
 4. 禁止访问其他项目的目录（`{remote_base}/projects/other_project/`）
 5. 所有操作前先 `cd {remote_base}/projects/{project}`

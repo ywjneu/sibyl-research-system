@@ -1,9 +1,9 @@
-"""Priority-based context builder for Sibyl agents.
+"""Internal priority-based context builder helpers.
 
-Replaces hard `content[:3000]` truncation with intelligent priority-based
-context management that allocates more tokens to higher-priority content.
+Currently used mainly by tests and future context-packing work. It is not part
+of the main Claude Code orchestration path.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

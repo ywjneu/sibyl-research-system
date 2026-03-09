@@ -1,7 +1,5 @@
 """Tests for workspace checkpoint functionality."""
-import json
 import time
-from pathlib import Path
 
 import pytest
 
@@ -37,6 +35,45 @@ class TestCheckpointCreation:
         assert cp["steps"]["intro"]["status"] == "completed"
         assert cp["steps"]["intro"]["file_size"] > 0
         assert cp["steps"]["intro"]["file_mtime"] > 0
+
+    def test_complete_step_with_artifacts(self, ws):
+        steps = {"intro": "writing/sections/intro.md"}
+        ws.create_checkpoint("writing_sections", "writing/sections", steps, iteration=1)
+        ws.write_file("writing/sections/intro.md", "# Introduction\n" * 100)
+        ws.write_file("writing/figures/gen_intro.py", "print('ok')\n")
+        ws.write_file("writing/figures/intro.pdf", "%PDF-1.4 mock\n")
+
+        result = ws.complete_checkpoint_step(
+            "writing/sections",
+            "intro",
+            artifacts=[
+                "writing/figures/gen_intro.py",
+                "writing/figures/intro.pdf",
+            ],
+        )
+
+        assert result["completed"] is True
+        cp = ws.load_checkpoint("writing/sections")
+        assert [a["path"] for a in cp["steps"]["intro"]["artifacts"]] == [
+            "writing/figures/gen_intro.py",
+            "writing/figures/intro.pdf",
+        ]
+
+    def test_missing_artifact_prevents_completion(self, ws):
+        steps = {"intro": "writing/sections/intro.md"}
+        ws.create_checkpoint("writing_sections", "writing/sections", steps, iteration=1)
+        ws.write_file("writing/sections/intro.md", "# Introduction\n" * 100)
+
+        result = ws.complete_checkpoint_step(
+            "writing/sections",
+            "intro",
+            artifacts=["writing/figures/missing.pdf"],
+        )
+
+        assert result["completed"] is False
+        assert result["missing_files"] == ["writing/figures/missing.pdf"]
+        cp = ws.load_checkpoint("writing/sections")
+        assert cp["steps"]["intro"]["status"] == "pending"
 
 
 class TestCheckpointValidation:
@@ -88,6 +125,23 @@ class TestCheckpointValidation:
         # Tamper: overwrite with different content (simulating partial write)
         ws.write_file("writing/sections/intro.md", "x")
         valid = ws.validate_checkpoint("writing/sections")
+        assert valid["completed"] == []
+        assert valid["remaining"] == ["intro"]
+
+    def test_missing_artifact_invalidates_completed_step(self, ws):
+        steps = {"intro": "writing/sections/intro.md"}
+        ws.create_checkpoint("writing_sections", "writing/sections", steps, iteration=1)
+        ws.write_file("writing/sections/intro.md", "content")
+        ws.write_file("writing/figures/intro.pdf", "%PDF-1.4 mock\n")
+        ws.complete_checkpoint_step(
+            "writing/sections",
+            "intro",
+            artifacts=["writing/figures/intro.pdf"],
+        )
+
+        (ws.root / "writing/figures/intro.pdf").unlink()
+        valid = ws.validate_checkpoint("writing/sections")
+
         assert valid["completed"] == []
         assert valid["remaining"] == ["intro"]
 

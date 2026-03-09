@@ -34,14 +34,20 @@ prompt: <构建好的评审 prompt，包含所有上下文和评审要求>
 approval-policy: "never"
 ```
 
-**注意：不要传 model 参数**，ChatGPT 账号使用默认模型（GPT-5）。
+如果 skill 参数里提供了 model override，则额外传：
+
+```
+model: <override model>
+```
+
+如果没有 override，则不要传 `model` 参数，使用 Codex MCP 默认模型。
 
 评审 prompt 应要求 Codex：
 - 以独立第三方视角评审（不受 Claude 生态偏见影响）
 - 指出被忽略的风险、假设漏洞、方法论缺陷
 - 提供具体的改进建议（不是泛泛而谈）
 - 打分 1-10 并给出理由
-- 所有输出使用中文
+- `review` 模式下对论文相关评审使用英文；其他模式遵循当前控制面语言
 
 ### 3. 保存结果
 

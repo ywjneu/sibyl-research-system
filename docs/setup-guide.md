@@ -155,7 +155,7 @@ cat config.yaml 2>/dev/null
 1. `ssh_server`: The server connection name configured in Step 3 (usually `"default"` if using ssh-mcp-server args directly, or a hostname if using `~/.ssh/config`)
 2. `remote_base`: Base directory on GPU server (e.g., `/home/username/sibyl_system`)
 3. `max_gpus`: Number of GPUs to use (e.g., 4)
-4. `language`: Output language, `"en"` (default) or `"zh"`
+4. `language`: Control-plane output language, `"zh"` (default) or `"en"`; paper drafting and LaTeX remain English
 
 **Write** `config.yaml`:
 ```yaml
@@ -163,7 +163,7 @@ cat config.yaml 2>/dev/null
 ssh_server: "<SSH_SERVER_NAME>"
 remote_base: "<REMOTE_BASE>"
 max_gpus: <MAX_GPUS>
-# language: en        # uncomment and change to "zh" for Chinese
+# language: zh        # uncomment and change to "en" for English control-plane output
 ```
 
 **Note**: `ssh_server` value depends on how SSH MCP was configured:

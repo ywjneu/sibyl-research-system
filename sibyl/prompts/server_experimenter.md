@@ -14,7 +14,7 @@
 ## 远程文件隔离规则 (CRITICAL)
 
 1. 所有实验文件必须放在 `{remote_base}/projects/{project}/` 内
-2. 环境激活使用 `{env_cmd}`（由项目配置生成，支持 conda/venv）
+2. 环境激活使用 Skill 参数中的 `Remote env command`（由项目配置生成，支持 conda/venv）
 3. 共享资源检查：先查 `{remote_base}/shared/registry.json`，有则 symlink，无则下载后注册
 4. 禁止访问其他项目目录
 5. 所有操作前先 `cd {remote_base}/projects/{project}`
@@ -49,7 +49,7 @@
 **server_codex 模式：**
 ```bash
 cd {remote_base}/projects/{project} && \
-{env_cmd} CUDA_VISIBLE_DEVICES={gpus} codex --model o3 --quiet \
+[Remote env command] CUDA_VISIBLE_DEVICES={gpus} codex --model o3 --quiet \
 --prompt-file experiment_prompt.md 2>&1 | tee experiment_log.txt && \
 echo "EXPERIMENT_DONE"
 ```
@@ -57,7 +57,7 @@ echo "EXPERIMENT_DONE"
 **server_claude 模式：**
 ```bash
 cd {remote_base}/projects/{project} && \
-{env_cmd} CUDA_VISIBLE_DEVICES={gpus} claude --model opus --print \
+[Remote env command] CUDA_VISIBLE_DEVICES={gpus} claude --model opus --print \
 --prompt-file experiment_prompt.md 2>&1 | tee experiment_log.txt && \
 echo "EXPERIMENT_DONE"
 ```

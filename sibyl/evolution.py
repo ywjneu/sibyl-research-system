@@ -220,59 +220,6 @@ class EvolutionEngine:
         with open(self.outcomes_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
 
-    def analyze_patterns(self) -> list[EvolutionInsight]:
-        """Analyze recorded outcomes for recurring patterns with time decay."""
-        outcomes = self._load_outcomes()
-        if not outcomes:
-            return []
-
-        # Count issue frequencies with category tracking and time decay
-        issue_counts: dict[str, dict] = {}
-        for outcome in outcomes:
-            weight = _time_weight(outcome.get("timestamp", ""))
-            classified = outcome.get("classified_issues", [])
-            if not classified:
-                classified = [
-                    {"description": issue, "category": IssueCategory.classify(issue).value}
-                    for issue in outcome.get("issues", [])
-                ]
-            for ci in classified:
-                key = ci["description"].lower().strip()
-                if not key:
-                    continue
-                if key not in issue_counts:
-                    issue_counts[key] = {
-                        "count": 0, "weighted": 0.0,
-                        "category": ci.get("category", "analysis"),
-                        "scores": [],
-                    }
-                issue_counts[key]["count"] += 1
-                issue_counts[key]["weighted"] += weight
-                issue_counts[key]["scores"].append(outcome["score"])
-
-        # Generate insights for issues with significant weighted frequency
-        insights = []
-        for issue, data in issue_counts.items():
-            # Require raw count >= 2 AND weighted frequency >= 1.0
-            if data["count"] >= 2 and data["weighted"] >= 1.0:
-                severity = "high" if data["weighted"] >= 2.5 else "medium"
-                category = data["category"]
-                agents = CATEGORY_TO_AGENTS.get(category, ["reflection"])
-                suggestion = CATEGORY_SUGGESTIONS.get(category, "检查并改进相关环节。")
-                insights.append(EvolutionInsight(
-                    pattern=issue,
-                    frequency=data["count"],
-                    severity=severity,
-                    suggestion=suggestion,
-                    affected_agents=agents,
-                    category=category,
-                    weighted_frequency=round(data["weighted"], 2),
-                ))
-
-        # Save insights
-        self._save_insights(insights)
-        return insights
-
     def get_quality_trend(self, project: str | None = None) -> list[dict]:
         """Get quality score trend over time."""
         outcomes = self._load_outcomes()

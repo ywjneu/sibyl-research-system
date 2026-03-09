@@ -40,13 +40,21 @@ Write to `{workspace}/writing/sections/{section_id}.md`
 
 Section IDs: intro, related_work, method, experiments, discussion, conclusion
 
-At the end of the section, include a `<!-- FIGURES -->` block listing all visual elements:
+At the end of the section, include a `<!-- FIGURES -->` block listing all visual elements and their exact artifact files:
 ```markdown
 <!-- FIGURES
-- Figure X: {figure_id}.pdf — {description}
+- Figure X: gen_{figure_id}.py, {figure_id}.pdf — {description}
+- Figure Y: {figure_id}_desc.md — {description}
 - Table Y: inline — {description}
+- None
 -->
 ```
+
+Rules:
+- List exact filenames relative to `writing/figures/` so checkpoint/audit can verify them
+- Code-generated figures must list both `gen_{figure_id}.py` and `{figure_id}.pdf`
+- Architecture/flow diagrams must list `{figure_id}_desc.md`
+- If this section has no visual elements, still include the block with `- None`
 
 ## Tool Usage
 - Use `Read` to read relevant workspace files and experiment data

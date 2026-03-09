@@ -7,7 +7,7 @@ argument-hint: "<project>"
 
 手动同步到飞书。
 
-**所有用户可见的输出必须使用中文。**
+**所有用户可见的输出遵循项目语言配置（`action.language` / `config.language`）；论文正文与 LaTeX 始终使用英文。默认配置为中文。**
 
 工作目录: 项目根目录（通过 $SIBYL_ROOT 或 cd 到 clone 位置）
 

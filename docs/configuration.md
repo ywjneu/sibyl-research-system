@@ -6,7 +6,7 @@
 
 Sibyl loads configuration in layers, with later layers overriding earlier ones:
 
-1. **Code defaults** — Built-in defaults from `Config` dataclass (`language: "en"`, etc.)
+1. **Code defaults** — Built-in defaults from `Config` dataclass (`language: "zh"`, etc.)
 2. **Root `config.yaml`** — Optional file at the project root directory. Use this for machine-level defaults shared across all research projects (e.g., `language: zh`, `ssh_server`). This file is in `.gitignore` and not committed.
 3. **Project `config.yaml`** — Per-project overrides at `workspaces/<project>/config.yaml`. Settings here take priority over root config.
 
@@ -85,7 +85,7 @@ Treat GPUs with low VRAM usage as available, even if allocated.
 |-------|------|---------|-------------|
 | `max_parallel_tasks` | int | `4` | Maximum parallel experiment tasks |
 | `experiment_timeout` | int | `300` | Experiment timeout in seconds |
-| `review_enabled` | bool | `true` | Enable review stage |
+| `review_enabled` | bool | `true` | Enable the `review` stage after `writing_latex`; when `false`, pipeline jumps directly to `reflection` |
 | `idea_exp_cycles` | int | `6` | Maximum PIVOT count before forcing PROCEED |
 | `debate_rounds` | int | `2` | Number of rounds in multi-agent debates |
 | `writing_revision_rounds` | int | `2` | Maximum writing revision rounds after final review |
@@ -94,25 +94,26 @@ Treat GPUs with low VRAM usage as available, even if allocated.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `language` | string | `"en"` | Agent output language: `en` (English) or `zh` (Chinese) |
+| `language` | string | `"zh"` | 控制面与非论文类产物语言：`en` (English) 或 `zh` (Chinese) |
 
 Controls the language for:
 - **Console output**: Status messages, progress logs, skill invocation summaries
-- **Research artifacts**: Proposals, experiment reports, research diary, outlines, reviews, all intermediate files
+- **Non-paper research artifacts**: Proposals, experiment reports, research diary, reflection notes, intermediate analysis
 - **Log files**: Stage summaries, error messages, status updates
 
 **Always in English regardless of this setting**:
 - Code and code comments
 - JSON keys
 - References and citations
-- Papers (paper.md) and LaTeX sources
+- Paper-writing artifacts: `writing/outline.md`, `writing/sections/*`, `writing/critique/*`, `writing/paper.md`, `writing/review.md`
+- LaTeX sources
 
 ```yaml
-# English (default)
-language: en
-
-# Chinese
+# Chinese (default)
 language: zh
+
+# English
+language: en
 ```
 
 ## Writing Mode
@@ -120,7 +121,7 @@ language: zh
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `writing_mode` | string | `"parallel"` | Writing strategy: `sequential` \| `parallel` \| `codex` |
-| `codex_writing_model` | string | `""` | Codex model for writing (empty = use `~/.codex/config.toml` default) |
+| `codex_writing_model` | string | `""` | Optional model override passed only to `sibyl-codex-writer` (empty = use Codex MCP default) |
 
 - **`sequential`**: Single agent writes all sections in order. Best consistency.
 - **`parallel`**: 6 agents write sections simultaneously. Faster, but may have style inconsistencies.
@@ -151,7 +152,7 @@ language: zh
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `codex_enabled` | bool | `true` | Enable GPT-5.4 independent cross-review |
-| `codex_model` | string | `""` | Codex model (empty = use `~/.codex/config.toml` default) |
+| `codex_model` | string | `""` | Optional model override for Codex review calls (empty = use Codex MCP default) |
 
 See [Codex Integration](codex-integration.md) for full setup instructions.
 
@@ -195,31 +196,20 @@ agent_tier_map:
   # All other agents default to "standard"
 ```
 
-## Agent-Specific Settings
+## Reserved Compatibility Blocks
 
-Fine-tune model parameters per pipeline phase:
+The nested `ideation`, `planning`, `experiment`, and `writing` blocks are still
+parsed from YAML so older configs continue to load, but the current Claude Code
+runtime does **not** use them as the primary model-routing surface.
 
-```yaml
-ideation:
-  model: claude-opus-4-6
-  max_tokens: 64000
-  temperature: 0.9    # Higher creativity
+Today, runtime model selection is controlled by:
 
-planning:
-  model: claude-opus-4-6
-  max_tokens: 64000
-  temperature: 0.7
+- `.claude/agents/sibyl-{heavy,standard,light}.md`
+- `model_tiers`
+- `agent_tier_map`
 
-experiment:
-  model: claude-opus-4-6
-  max_tokens: 64000
-  temperature: 0.3    # Low temperature for precise code
-
-writing:
-  model: claude-opus-4-6
-  max_tokens: 64000
-  temperature: 0.5
-```
+If you include the legacy nested blocks, treat them as compatibility data rather
+than the authoritative runtime switchboard.
 
 ## Full Example
 

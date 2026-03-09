@@ -1,13 +1,10 @@
 """Tests for support modules: config, context_builder, evolution, experiment_records, reflection."""
-import json
-import tempfile
-from pathlib import Path
 
 import pytest
 
-from sibyl.config import Config, AgentConfig
+from sibyl.config import Config
 from sibyl.context_builder import ContextBuilder, estimate_tokens, truncate_to_tokens
-from sibyl.evolution import EvolutionEngine, IssueCategory, EvolutionInsight, OutcomeRecord, DigestEntry
+from sibyl.evolution import EvolutionEngine, IssueCategory
 from sibyl.experiment_records import ExperimentDB, ExperimentRecord
 from sibyl.reflection import IterationLogger
 

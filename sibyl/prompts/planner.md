@@ -11,10 +11,12 @@ Read from workspace:
 - `{workspace}/idea/proposal.md`
 - `{workspace}/idea/hypotheses.md`
 
+Read planning constraints from the Skill's `Planning detail` argument.
+
 Design experiments to test each hypothesis.
 
 For EACH experiment task, also design a PILOT version:
-- Pilot: {pilot_samples} samples, seed 42, <{pilot_timeout}s
+- Pilot: use the sample count and timeout specified in `Planning detail`, seed 42
 - Include pass_criteria for each pilot (e.g., 'PPL < 2x baseline AND diversity > 0.5')
 - Include estimated_time_min
 
@@ -112,7 +114,7 @@ This helps the experimenter save result data in formats suitable for figure gene
 - `{workspace}/plan/pilot_plan.json`: Pilot-specific details
 
 ### fix-gpu 模式
-当以 `fix-gpu {workspace}` 参数调用时，表示已有的 task_plan.json 缺少 `gpu_count` 或 `estimated_minutes`。
+当 Skill 参数中的 `Mode` 为 `fix-gpu` 时，表示已有的 task_plan.json 缺少 `gpu_count` 或 `estimated_minutes`。
 读取现有 task_plan.json，为每个缺失这两个字段的 task 补全合理值后写回。不要修改其他字段。
 
 ## Tool Usage

@@ -2,28 +2,32 @@
 
 ## 语言要求 (CRITICAL)
 
-**所有输出必须使用中文。** 包括用户看到的一切信息和生成的所有文件。
+本次运行的**控制面语言**使用中文。
 
-### 控制台输出（状态信息、进度日志、skill 调用摘要）
+### 跟随 locale 的输出（必须使用中文）
 - 执行过程中打印给用户的所有消息**必须使用中文**
 - 阶段切换通知、错误信息、状态更新 — 中文
-
-### 研究产物
 - 研究提案 (proposal.md)、假设、备选方案
 - 实验报告、结果分析和实验日志
 - 研究日记 (research_diary.md) 和阶段总结
-- 论文大纲、评审意见和批评反馈
 - 讨论、结论、错误报告和建议
-- 所有中间产物和日志文件
+- 评审意见、批评反馈、反思笔记
 
-### 以下**必须使用英文**
+### 以下始终必须使用英文（不受 locale 影响）
+- 论文规划与正文：`writing/outline.md`、`writing/sections/*.md`、`writing/paper.md`
+- 论文链路评审产物：`writing/critique/*`、`writing/review.md`
+- LaTeX 产物：`writing/latex/*`
 - 代码和代码注释
 - JSON 数据结构的 key
 - 参考文献条目
-- 论文正文 (paper.md) 和 LaTeX 源文件 — 始终使用英文撰写
+- 图表标题、caption、label 以及论文正文
 
 ### 以下可使用英文
 - 技术术语（首次出现时附中文解释）
+
+### 额外规则
+- 不要把已经是英文的论文草稿重新翻译成中文
+- 如果历史文件语言不符合上述规则，在编辑时按上述规则统一
 
 ## 工作区规范
 
@@ -96,7 +100,7 @@
 - 所有远程文件必须在 `{remote_base}/` 内
 - 项目文件限定在 `{remote_base}/projects/{project}/`
 - 共享数据集/预训练权重放 `{remote_base}/shared/`，先查 `{remote_base}/shared/registry.json` 再下载
-- 环境使用 `{env_cmd}`（由项目配置决定，conda 或 venv）
+- 环境激活使用调用方 skill/action 提供的 remote env command（由项目配置决定，支持 conda 或 venv）
 - 禁止访问其他项目的目录
 
 ## 迭代管理规范
