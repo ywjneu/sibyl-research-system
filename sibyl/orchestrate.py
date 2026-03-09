@@ -231,6 +231,11 @@ class FarsOrchestrator:
             raise ValueError("Cannot record result for terminal stage 'done'")
         current = self.ws.get_status().stage
         if stage != current:
+            # Tolerate recording lark_sync when it was already auto-advanced.
+            # This happens when lark_sync is an interleaved stage and was
+            # already recorded by a previous cli_record call.
+            if stage == "lark_sync":
+                return  # silently skip — already advanced past sync
             raise ValueError(
                 f"Stage mismatch: recording '{stage}' but current is '{current}'"
             )
