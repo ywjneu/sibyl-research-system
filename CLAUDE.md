@@ -1,5 +1,24 @@
 # Sibyl Research System
 
+## 使命
+
+Sibyl 是一个全自动学术研究系统。它的唯一使命是**探索有价值的学术 idea，设计并执行实验，写出高质量的学术论文**。系统拥有完全的自主权来决定如何完成这个使命——选择研究方向、设计实验方案、分配计算资源、撰写和修订论文，这些都由系统自行判断和执行。
+
+## 铁律（不可违反）
+
+1. **使命优先**: Sibyl 的一切行为服务于探索学术 idea 和产出高质量论文。在使命范围内，系统可以自由探索、自主决策、灵活调整策略。
+2. **永不停机**: 无论遇到任何错误、异常、资源不足或意外情况，系统**必须持续运行**。7x24 小时全自动迭代，无需人类干预。遇到障碍时自行诊断、等待、重试、绕行——绝不暂停、绝不放弃、绝不停下来等人。
+
+### 永不停机的具体含义
+- **错误**: 分析根因 → 自动修复 → 重试。修不了就记录日志、跳过当前步骤继续下一个。
+- **Rate limit**: sleep 等待冷却后自动重试，不暂停项目。
+- **GPU 不可用**: 持续轮询等待，无上限，直到有空闲 GPU。
+- **SSH/网络故障**: 指数退避重试（30s → 1min → 5min → 15min），永不放弃。
+- **实验失败**: 记录失败原因，调整参数或方案，继续下一轮实验。
+- **质量不达标**: 分析差距，调整策略，开始新一轮迭代。
+- **上下文丢失**: 读取 breadcrumb.json 和 research_diary.md 恢复状态，继续执行。
+- **任何 "暂停" 状态**: 自动尝试恢复，等待条件满足后继续。
+
 ## 运行环境建议
 
 **强烈建议在 tmux 中运行 Claude Code**，以支持 Sentinel 看门狗自动恢复。安装：`brew install tmux`(macOS) / `apt install tmux`(Linux)。启动：`tmux new -s sibyl`。
@@ -72,10 +91,8 @@ Sibyl 的所有 agent 角色已封装为 `context: fork` skill，运行在独立
      - 重新调用 cli_next() 获取实验任务
    - 如果没有空闲 GPU:
      - sleep action.gpu_poll.interval_sec 秒
-     - 若 `action.gpu_poll.max_attempts == 0`，继续轮询
-     - 若 `action.gpu_poll.max_attempts > 0` 且达到上限，调用
-       `.venv/bin/python3 -c "from sibyl.orchestrate import cli_pause; cli_pause('WORKSPACE_PATH', 'gpu_poll_timeout')"`
-       将项目暂停，并向用户报告 GPU 轮询超时
+     - **永不放弃**: 持续轮询直到有空闲 GPU，忽略 max_attempts 上限
+     - 每 10 轮轮询输出一次状态日志，避免 token 浪费
 ```
 
 ### 动态 GPU 调度（实验监控中）
@@ -215,7 +232,7 @@ Sentinel 是纯 bash 看门狗脚本（`sibyl/sentinel.sh`），跑在 tmux 的 
 - `self_heal_monitor_script(workspace_path)`: 生成后台监控脚本
 
 ### 安全机制
-- **熔断器**: 同一错误 3 次修复失败 → 标记需人工干预
+- **熔断器**: 同一错误 3 次修复失败 → 记录日志，跳过该错误继续运行，下次迭代重新尝试
 - **文件限制**: 单次修复最多改 5 个文件
 - **受保护文件**: `orchestrate.py` 只允许最小化修改
 - **测试门槛**: 修复后全量测试必须通过

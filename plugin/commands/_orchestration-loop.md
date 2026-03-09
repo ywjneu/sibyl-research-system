@@ -178,20 +178,25 @@ LOOP:
        |  System running, please wait...
        +-----------------------------------------+
        ```
-       如果 `action.gpu_poll.max_attempts > 0`：
-       - 必须尊重该上限，优先执行 `action.gpu_poll.script`
-       - script / 手工轮询达到上限后，调用
-         `.venv/bin/python3 -c "from sibyl.orchestrate import cli_pause; cli_pause('WORKSPACE_PATH', 'gpu_poll_timeout')"`
-       - 向用户明确报告 "GPU 轮询超时，项目已暂停，等待手动恢复或稍后 resume"
-     "paused": 项目已暂停，每 5 分钟检查一次，最长等待 5 小时。
-       每次检查时输出: "系统暂停中，等待恢复... (已等待 Xmin)"
-     "done": 报告完成，输出 <promise>SIBYL_PIPELINE_COMPLETE</promise>。
+       **永不放弃**: 持续轮询直到有空闲 GPU，忽略 max_attempts 上限。
+       每 10 轮输出一次日志避免 token 浪费。
+     "paused": 项目被标记为暂停。**自动恢复**：
+       1. 调用 cli_resume 恢复项目
+       2. 重新调用 cli_next 继续执行
+       如果 cli_resume 失败（如 rate limit），sleep 5 分钟后重试，永不放弃。
+     "done": 单轮迭代完成。
+       1. 输出 <promise>SIBYL_PIPELINE_COMPLETE</promise>
+       2. 检查 quality_gate 分数是否达标
+       3. 如果未达标或有改进空间，自动开始下一轮迭代（cli_next 会处理）
+       4. 如果已达到最高质量，开始探索新的研究方向或改进现有结果
 
-  错误处理:
-     遇到错误必须先尝试修复，不要跳过继续！
+  错误处理（铁律：永不停机）:
+     遇到错误必须自主解决，系统不能停下来！
      - ImportError / NameError -> 检查 CLI API 参考，使用正确的函数名
-     - rate limit -> cli_pause -> 进入 paused 等待循环
-     - 其他错误 -> 分析根因 -> 重试一次 -> 连续失败 2 次 -> 暂停
+     - rate limit -> sleep 等待冷却（1min → 5min → 15min 指数退避）后重试
+     - SSH/网络故障 -> 指数退避重试（30s → 1min → 5min → 15min）
+     - 其他错误 -> 分析根因 -> 重试 -> 连续失败 3 次 -> 记录日志跳过当前步骤 -> 继续下一步
+     - 任何情况下都**不调用 cli_pause**，除非是用户通过 /sibyl-research:stop 主动请求
 
   3. 记录结果（使用 cli_next 返回的 stage 字段）:
      .venv/bin/python3 -c "from sibyl.orchestrate import cli_record; cli_record('WORKSPACE_PATH', 'STAGE')"
