@@ -1,5 +1,9 @@
 # Sibyl Research System
 
+## 运行环境建议
+
+**强烈建议在 tmux 中运行 Claude Code**，以支持 Sentinel 看门狗自动恢复。安装：`brew install tmux`(macOS) / `apt install tmux`(Linux)。启动：`tmux new -s sibyl`。
+
 ## Python 环境（强制规则）
 
 本项目使用 **venv** 环境，位于 `.venv/`（Python 3.12，基于 conda base 创建）。
