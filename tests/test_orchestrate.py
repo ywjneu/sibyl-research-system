@@ -1,6 +1,7 @@
 """Tests for sibyl.orchestrate module."""
 import json
 import shlex
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,7 @@ import pytest
 from sibyl.orchestrate import (
     FarsOrchestrator, load_prompt, load_common_prompt,
     PAPER_SECTIONS, cli_checkpoint, cli_dispatch_tasks,
-    project_marker_file,
+    project_marker_file, self_heal_monitor_script,
     cli_experiment_status,
 )
 from sibyl.workspace import Workspace
@@ -175,6 +176,80 @@ class TestRecordResult:
             cwd=o.ws.root, capture_output=True, text=True
         )
         assert "literature_search" in result.stdout
+
+
+# ══════════════════════════════════════════════
+# Background Feishu sync
+# ══════════════════════════════════════════════
+
+class TestBackgroundSync:
+    """Tests for background Feishu sync trigger in cli_record."""
+
+    def test_cli_record_appends_pending_sync_when_lark_enabled(self, make_orchestrator):
+        """cli_record should append a line to pending_sync.jsonl when lark_enabled."""
+        o = make_orchestrator(stage="literature_search", lark_enabled=True)
+        o.record_result("literature_search")
+        pending_path = Path(o.ws.root) / o.ws.name / "lark_sync" / "pending_sync.jsonl"
+        assert pending_path.exists()
+        lines = pending_path.read_text().strip().split("\n")
+        assert len(lines) == 1
+        entry = json.loads(lines[0])
+        assert entry["trigger_stage"] == "literature_search"
+        assert "timestamp" in entry
+        assert "iteration" in entry
+
+    def test_cli_record_no_pending_sync_when_lark_disabled(self, make_orchestrator):
+        """No pending_sync.jsonl written when lark_enabled=False."""
+        o = make_orchestrator(stage="literature_search", lark_enabled=False)
+        o.record_result("literature_search")
+        pending_path = Path(o.ws.root) / o.ws.name / "lark_sync" / "pending_sync.jsonl"
+        assert not pending_path.exists()
+
+    def test_cli_record_appends_multiple_syncs(self, make_orchestrator):
+        """Multiple stage completions append multiple lines."""
+        o = make_orchestrator(stage="literature_search", lark_enabled=True)
+        o.record_result("literature_search")
+        o.record_result("idea_debate")
+        pending_path = Path(o.ws.root) / o.ws.name / "lark_sync" / "pending_sync.jsonl"
+        lines = pending_path.read_text().strip().split("\n")
+        assert len(lines) == 2
+        assert json.loads(lines[0])["trigger_stage"] == "literature_search"
+        assert json.loads(lines[1])["trigger_stage"] == "idea_debate"
+
+    def test_cli_record_returns_sync_requested(self, make_orchestrator, capsys):
+        """cli_record output includes sync_requested when lark_enabled."""
+        o = make_orchestrator(stage="literature_search", lark_enabled=True)
+        # Use cli_record to check printed output
+        from sibyl.orchestrate import cli_record
+        cli_record(str(Path(o.ws.root) / o.ws.name), "literature_search")
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["sync_requested"] is True
+
+    def test_cli_record_no_sync_requested_when_disabled(self, make_orchestrator, capsys):
+        """cli_record output has no sync_requested when lark disabled."""
+        o = make_orchestrator(stage="literature_search", lark_enabled=False)
+        from sibyl.orchestrate import cli_record
+        cli_record(str(Path(o.ws.root) / o.ws.name), "literature_search")
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output.get("sync_requested", False) is False
+
+    def test_no_pending_sync_for_init_stage(self, make_orchestrator):
+        """init stage should not trigger sync."""
+        o = make_orchestrator(stage="init", lark_enabled=True)
+        # init auto-advances, but shouldn't write sync trigger
+        pending_path = Path(o.ws.root) / o.ws.name / "lark_sync" / "pending_sync.jsonl"
+        assert not pending_path.exists()
+
+    def test_no_pending_sync_for_quality_gate(self, make_orchestrator):
+        """quality_gate should not trigger sync."""
+        o = make_orchestrator(stage="quality_gate", lark_enabled=True, iteration=1)
+        # quality_gate needs a score to proceed
+        o.ws.write_file("logs/stage_review_score.txt", "9.0")
+        o.record_result("quality_gate", score=9.0)
+        pending_path = Path(o.ws.root) / o.ws.name / "lark_sync" / "pending_sync.jsonl"
+        assert not pending_path.exists()
 
 
 # ══════════════════════════════════════════════
@@ -1829,7 +1904,26 @@ class TestExperimentBatchRegistersRunning:
         action = o.get_next_action()
 
         dispatch_cmd = action["experiment_monitor"]["dispatch_cmd"]
-        assert f"cli_dispatch_tasks({str(o.ws.root / 'current')!r})" in dispatch_cmd
+        assert shlex.quote(sys.executable) in dispatch_cmd
+        assert "-m sibyl.cli dispatch" in dispatch_cmd
+        assert shlex.quote(str(o.ws.root / "current")) in dispatch_cmd
+        assert ".venv/bin/python3" not in dispatch_cmd
+        assert "cli_dispatch_tasks(" not in dispatch_cmd
+
+
+class TestSelfHealMonitorScript:
+    def test_self_heal_monitor_script_uses_project_scoped_status_and_cli(self):
+        workspace = "/tmp/demo dir/it's ok"
+
+        script = self_heal_monitor_script(workspace, interval_sec=60)
+
+        expected_status_file = project_marker_file(Path(workspace).name, "self_heal_monitor")
+        assert f"WORKSPACE={shlex.quote(workspace)}" in script
+        assert f"STATUS_FILE={shlex.quote(expected_status_file)}" in script
+        assert "-m sibyl.cli self-heal-scan" in script
+        assert shlex.quote(sys.executable) in script
+        assert ".venv/bin/python3" not in script
+        assert "cli_self_heal_scan(" not in script
 
 
 # ══════════════════════════════════════════════
