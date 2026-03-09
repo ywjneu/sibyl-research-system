@@ -9,11 +9,9 @@ from pathlib import Path
 
 import yaml
 
+from sibyl._paths import REPO_ROOT
 from sibyl.orchestrate import load_workspace_iteration_dirs, resolve_workspace_root
 from sibyl.workspace import Workspace
-
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
 DEMO_ROOT = REPO_ROOT / "demos" / "remote_parallel_smoke"
 
 

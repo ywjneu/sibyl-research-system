@@ -133,9 +133,9 @@ def resolve_workspace_root(workspace_path: str | Path) -> Path:
 
 def build_repo_python_cli_command(*args: str | Path) -> str:
     """Build a shell-safe repo-local `python -m sibyl.cli ...` command."""
-    repo_root = Path(__file__).resolve().parent.parent
+    from sibyl._paths import REPO_ROOT
     cmd = shlex.join([sys.executable, "-m", "sibyl.cli", *(str(arg) for arg in args)])
-    return f"cd {shlex.quote(str(repo_root))} && {cmd}"
+    return f"cd {shlex.quote(str(REPO_ROOT))} && {cmd}"
 
 
 def self_heal_status_file(workspace_path: str | Path) -> str:
