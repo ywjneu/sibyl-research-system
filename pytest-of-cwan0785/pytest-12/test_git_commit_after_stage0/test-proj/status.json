@@ -1,7 +1,7 @@
 {
-  "stage": "literature_search",
+  "stage": "idea_debate",
   "started_at": 1773142062.727238,
-  "updated_at": 1773142062.7300632,
+  "updated_at": 1773142062.8092742,
   "iteration": 0,
   "errors": [],
   "paused": false,
@@ -9,5 +9,5 @@
   "stop_requested": false,
   "stop_requested_at": null,
   "iteration_dirs": false,
-  "stage_started_at": 1773142062.7300632
+  "stage_started_at": 1773142062.809273
 }
