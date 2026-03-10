@@ -58,9 +58,9 @@ def test_claude_runtime_assets_are_not_gitignored():
 
 def test_plugin_language_defaults_use_zh():
     """Language default 'zh' must appear in orchestration loop or command files."""
-    # The language default is now in the shared _orchestration-loop.md
+    # The language default is in the orchestration loop prompt (migrated to sibyl/prompts/)
     checked_files = [
-        "plugin/commands/_orchestration-loop.md",
+        "sibyl/prompts/orchestration_loop.md",
         "plugin/commands/start.md",
         "plugin/commands/resume.md",
     ]
@@ -106,7 +106,7 @@ def test_architecture_docs_describe_project_scoped_gpu_marker():
 
 
 def test_background_lark_sync_docs_match_runtime_contract():
-    loop_doc = (REPO_ROOT / "plugin/commands/_orchestration-loop.md").read_text(encoding="utf-8")
+    loop_doc = (REPO_ROOT / "sibyl/prompts/orchestration_loop.md").read_text(encoding="utf-8")
     debug_doc = (REPO_ROOT / "plugin/commands/debug.md").read_text(encoding="utf-8")
     architecture_doc = (REPO_ROOT / "docs/architecture.md").read_text(encoding="utf-8")
     setup_doc = (REPO_ROOT / "docs/feishu-lark-setup.md").read_text(encoding="utf-8")
@@ -136,7 +136,7 @@ def test_gpu_poll_docs_describe_never_stop_contract():
     """GPU poll docs must describe never-stop behavior (no pause on timeout)."""
     required = {
         "CLAUDE.md": ("action.gpu_poll.script", "永不放弃"),
-        "plugin/commands/_orchestration-loop.md": ("gpu_poll", "永不放弃"),
+        "sibyl/prompts/orchestration_loop.md": ("gpu_poll", "永不放弃"),
     }
 
     for rel_path, snippets in required.items():
@@ -145,7 +145,7 @@ def test_gpu_poll_docs_describe_never_stop_contract():
             assert snippet in text, f"{rel_path} missing {snippet}"
 
     # Verify no file tells the system to pause on GPU poll timeout
-    for rel_path in ("plugin/commands/_orchestration-loop.md",):
+    for rel_path in ("sibyl/prompts/orchestration_loop.md",):
         text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
         assert "gpu_poll_timeout" not in text, f"{rel_path} still references gpu_poll_timeout pause"
 
