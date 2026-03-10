@@ -77,13 +77,15 @@ lark_enabled: true    # Default: true
 
 ## How Sync Works
 
-1. After each pipeline stage, `lark_sync` is automatically triggered
-2. The `sibyl-lark-sync` skill:
+1. After each eligible pipeline stage, `cli_record()` appends a trigger to `{workspace}/lark_sync/pending_sync.jsonl` and returns `sync_requested: true`
+2. The main Claude session launches `sibyl-lark-sync` in the background (non-blocking)
+3. The `sibyl-lark-sync` skill:
    - Creates/updates a Feishu document for the research project
    - Uploads experiment results as native tables (NOT code blocks)
    - Syncs research diary and stage summaries
    - Uploads compiled PDF papers
-3. Token registry stored in `{workspace}/lark_sync/registry.json`
+4. Token registry stored in `{workspace}/lark_sync/registry.json`
+5. Latest result is stored in `{workspace}/lark_sync/sync_status.json`
 
 ### Document Rules
 
@@ -97,7 +99,7 @@ lark_enabled: true    # Default: true
 lark_enabled: false
 ```
 
-When disabled, `lark_sync` stages are skipped entirely. All research data remains available locally in the workspace.
+When disabled, background sync triggers are skipped entirely. All research data remains available locally in the workspace.
 
 ## Manual Sync
 

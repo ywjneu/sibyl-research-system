@@ -4,7 +4,7 @@ Deep dive into Sibyl Research System internals. For contributors and advanced us
 
 ## Orchestrator State Machine
 
-The core of Sibyl is a **19-stage state machine** in `sibyl/orchestrate.py`.
+The core of Sibyl is a **18-stage state machine** in `sibyl/orchestrate.py`.
 
 ### State Flow
 
@@ -13,7 +13,7 @@ init → literature_search → idea_debate → planning → pilot_experiments
 → experiment_cycle → result_debate → experiment_decision
 → writing_outline → writing_sections → writing_critique
 → writing_integrate → writing_final_review → writing_latex
-→ review → reflection → lark_sync → quality_gate → done
+→ review → reflection → quality_gate → done
 ```
 
 ### Key Methods
@@ -32,11 +32,11 @@ init → literature_search → idea_debate → planning → pilot_experiments
 | `writing_final_review` | Fail (< max rounds) | `writing_integrate` |
 | `quality_gate` | Score ≥ 8.0 AND iterations ≥ 2 | `done` |
 | `quality_gate` | Otherwise | `literature_search` (next iteration) |
-| Any stage | `lark_enabled` | `lark_sync` inserted after each stage |
+| Any stage except `init` / `quality_gate` / `done` | `lark_enabled` | append background sync trigger after `cli_record()` |
 
-### Lark Sync Interleaving
+### Background Lark Sync
 
-When `lark_enabled: true`, `_get_next_stage()` intercepts every stage transition and inserts a `lark_sync` stage. The real next stage is stored in `resume_after_sync`. Exceptions: init, quality_gate, experiment batch loops, and lark_sync itself.
+When `lark_enabled: true`, Feishu sync is no longer a pipeline stage. Instead, `cli_record()` appends a trigger to `lark_sync/pending_sync.jsonl` and returns `sync_requested: true`. The main Claude session must launch `sibyl-lark-sync` in the background and continue the research loop without waiting. Sync status is written to `lark_sync/sync_status.json`.
 
 ## Action Types
 

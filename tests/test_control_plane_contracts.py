@@ -105,6 +105,33 @@ def test_architecture_docs_describe_project_scoped_gpu_marker():
     assert "/tmp/sibyl_<project>_gpu_free.json" in architecture_doc
 
 
+def test_background_lark_sync_docs_match_runtime_contract():
+    loop_doc = (REPO_ROOT / "plugin/commands/_orchestration-loop.md").read_text(encoding="utf-8")
+    debug_doc = (REPO_ROOT / "plugin/commands/debug.md").read_text(encoding="utf-8")
+    architecture_doc = (REPO_ROOT / "docs/architecture.md").read_text(encoding="utf-8")
+    setup_doc = (REPO_ROOT / "docs/feishu-lark-setup.md").read_text(encoding="utf-8")
+
+    assert "sync_requested" in loop_doc
+    assert "pending_sync.jsonl" in loop_doc
+    assert "run_in_background" in loop_doc
+    assert "lark_sync → quality_gate" not in loop_doc
+    assert "完整同步在 lark_sync 阶段" not in loop_doc
+
+    assert "sync_requested" in debug_doc
+    assert "后台启动 `sibyl-lark-sync" in debug_doc
+    assert '"lark_sync": 由 sibyl-lark-sync skill 自动执行飞书同步。' not in debug_doc
+
+    assert "18-stage state machine" in architecture_doc
+    assert "pending_sync.jsonl" in architecture_doc
+    assert "lark_sync → quality_gate" not in architecture_doc
+    assert "inserts a `lark_sync` stage" not in architecture_doc
+
+    assert "sync_requested: true" in setup_doc
+    assert "pending_sync.jsonl" in setup_doc
+    assert "background" in setup_doc.lower()
+    assert "lark_sync` is automatically triggered" not in setup_doc
+
+
 def test_gpu_poll_docs_describe_never_stop_contract():
     """GPU poll docs must describe never-stop behavior (no pause on timeout)."""
     required = {
