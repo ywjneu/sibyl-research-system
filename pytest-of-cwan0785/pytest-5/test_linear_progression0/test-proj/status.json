@@ -1,7 +1,7 @@
 {
-  "stage": "writing_sections",
+  "stage": "writing_critique",
   "started_at": 1773125838.184414,
-  "updated_at": 1773125838.9201999,
+  "updated_at": 1773125839.0035892,
   "iteration": 0,
   "errors": [
     {
@@ -14,5 +14,5 @@
   "stop_requested": false,
   "stop_requested_at": null,
   "iteration_dirs": false,
-  "stage_started_at": 1773125838.9201999
+  "stage_started_at": 1773125839.0035892
 }
