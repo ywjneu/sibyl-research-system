@@ -1,7 +1,7 @@
 {
-  "stage": "idea_debate",
+  "stage": "planning",
   "started_at": 1773133582.9614131,
-  "updated_at": 1773133582.9625988,
+  "updated_at": 1773133583.0699892,
   "iteration": 0,
   "errors": [],
   "paused": false,
@@ -9,5 +9,5 @@
   "stop_requested": false,
   "stop_requested_at": null,
   "iteration_dirs": false,
-  "stage_started_at": 1773133582.9625978
+  "stage_started_at": 1773133583.0699892
 }
