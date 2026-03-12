@@ -22,12 +22,17 @@ GPU polling:
     GPUs with memory usage below a threshold. The polling is designed to be
     executed as a lightweight bash command (no LLM needed).
 """
-import fcntl
 import json
 import re
+import sys
 from collections import deque
 from contextlib import contextmanager
 from pathlib import Path
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 
 @contextmanager
@@ -40,10 +45,20 @@ def _progress_lock(workspace_root: Path):
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_fd = open(lock_path, "w")
     try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        if sys.platform == "win32":
+            msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
         yield
     finally:
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        if sys.platform == "win32":
+            try:
+                lock_fd.seek(0)
+                msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+        else:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
         lock_fd.close()
 
 

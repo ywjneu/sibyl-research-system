@@ -11,10 +11,32 @@ This module is intentionally dependency-free (no imports from sibyl.*) so it
 can be used safely from any layer without circular imports.
 """
 
-import fcntl
 import json
+import os
+import sys
 import time
 from pathlib import Path
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _lock(f):
+        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+
+    def _unlock(f):
+        try:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+else:
+    import fcntl
+
+    def _lock(f):
+        fcntl.flock(f, fcntl.LOCK_EX)
+
+    def _unlock(f):
+        fcntl.flock(f, fcntl.LOCK_UN)
 
 
 class EventLogger:
@@ -34,11 +56,11 @@ class EventLogger:
         self._ensure_dir()
         line = json.dumps(entry, ensure_ascii=False, default=str) + "\n"
         with open(self.events_file, "a", encoding="utf-8") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
+            _lock(f)
             try:
                 f.write(line)
             finally:
-                fcntl.flock(f, fcntl.LOCK_UN)
+                _unlock(f)
         return entry
 
     # ── Stage lifecycle ──────────────────────────────────────────────
