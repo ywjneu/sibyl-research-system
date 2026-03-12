@@ -26,11 +26,21 @@ _DEFAULT_PROJECT_MEMORY = """# Project Memory
 """
 
 
+def _is_link_or_junction(path: Path) -> bool:
+    """Return True if *path* is a symlink or a Windows junction."""
+    if path.is_symlink():
+        return True
+    if hasattr(path, "is_junction") and path.is_junction():
+        return True
+    return False
+
+
 def _ensure_symlink(link_path: Path, target_path: Path) -> None:
-    """Create a symlink when the target exists and the link is still unmanaged."""
+    """Create a symlink (or junction on Windows) when the target exists and the link is still unmanaged."""
+    import sys
     if not target_path.exists():
         return
-    if link_path.is_symlink():
+    if _is_link_or_junction(link_path):
         try:
             if link_path.resolve() == target_path.resolve():
                 return
@@ -40,7 +50,26 @@ def _ensure_symlink(link_path: Path, target_path: Path) -> None:
     if link_path.exists():
         return
     link_path.parent.mkdir(parents=True, exist_ok=True)
-    link_path.symlink_to(target_path)
+    if sys.platform == "win32":
+        # On Windows, symlinks require admin privileges; use junction for dirs,
+        # or copy for files as fallback.
+        import shutil
+        import subprocess
+        target_resolved = target_path.resolve()
+        if target_resolved.is_dir():
+            try:
+                # Try junction first (no admin needed)
+                subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(link_path), str(target_resolved)],
+                    check=True, capture_output=True,
+                )
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                # Fall back to copying directory
+                shutil.copytree(str(target_resolved), str(link_path))
+        else:
+            shutil.copy2(str(target_resolved), str(link_path))
+    else:
+        link_path.symlink_to(target_path)
 
 
 def detect_workspace_root(candidate: str | Path | None = None) -> Path | None:

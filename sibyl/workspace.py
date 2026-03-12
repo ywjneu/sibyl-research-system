@@ -12,6 +12,7 @@ from sibyl.runtime_assets import (
     WORKSPACE_PROJECT_MEMORY,
     WORKSPACE_PROJECT_PROMPT_OVERLAYS,
     WORKSPACE_SYSTEM_META,
+    _is_link_or_junction,
     ensure_workspace_runtime_assets,
 )
 
@@ -749,19 +750,20 @@ class Workspace:
 
         if not project_memory_path.exists():
             warnings.append("Missing .sibyl/project/MEMORY.md")
-        if not agents_link.is_symlink() and agents_link.exists():
+        if not _is_link_or_junction(agents_link) and agents_link.exists():
             warnings.append(".claude/agents is not a symlink")
-        if not skills_link.is_symlink() and skills_link.exists():
+        if not _is_link_or_junction(skills_link) and skills_link.exists():
             warnings.append(".claude/skills is not a symlink")
-        if not settings_link.is_symlink() and settings_link.exists():
+        if not _is_link_or_junction(settings_link) and settings_link.exists():
             warnings.append(".claude/settings.local.json is not a symlink")
-        if not venv_link.is_symlink() and venv_link.exists():
+        if not _is_link_or_junction(venv_link) and venv_link.exists():
             warnings.append(".venv is not a symlink")
 
-        links_ok = all(
-            path.is_symlink()
-            for path in (agents_link, skills_link, settings_link, venv_link)
-        )
+        _required_links = [agents_link, skills_link, venv_link]
+        # settings.local.json is optional — only required when the source exists
+        if settings_link.exists() or _is_link_or_junction(settings_link):
+            _required_links.append(settings_link)
+        links_ok = all(_is_link_or_junction(path) for path in _required_links)
         project_layer_ok = project_memory_path.exists() and overlays_dir.exists()
         runtime_ready = bool(system_root) and links_ok and project_layer_ok and claude_generated
         scaffold_ready = (
@@ -785,10 +787,10 @@ class Workspace:
             "claude_md_generated": claude_generated,
             "claude_md_path": str(claude_path),
             "links": {
-                "agents": agents_link.is_symlink(),
-                "skills": skills_link.is_symlink(),
-                "settings": settings_link.is_symlink(),
-                "venv": venv_link.is_symlink(),
+                "agents": _is_link_or_junction(agents_link),
+                "skills": _is_link_or_junction(skills_link),
+                "settings": _is_link_or_junction(settings_link),
+                "venv": _is_link_or_junction(venv_link),
             },
             "topic_exists": topic_exists,
             "config_exists": config_exists,
