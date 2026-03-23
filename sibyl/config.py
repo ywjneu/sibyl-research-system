@@ -179,7 +179,7 @@ class Config:
                 f"Invalid writing_mode '{cfg.writing_mode}', "
                 f"must be one of {valid_writing_modes}"
             )
-        valid_experiment_modes = {"ssh_mcp", "server_codex", "server_claude"}
+        valid_experiment_modes = {"ssh_mcp", "server_codex", "server_claude", "local"}
         if cfg.experiment_mode not in valid_experiment_modes:
             raise ValueError(
                 f"Invalid experiment_mode '{cfg.experiment_mode}', "

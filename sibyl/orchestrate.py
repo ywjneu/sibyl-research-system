@@ -1066,6 +1066,9 @@ class FarsOrchestrator:
         else:
             # No polling: assume GPUs 0..max_gpus-1 are available
             effective_gpu_ids = list(range(self.config.max_gpus))
+            # Local mode with max_gpus=0: create virtual CPU slot for CPU-only tasks
+            if not effective_gpu_ids and self.config.experiment_mode == "local":
+                effective_gpu_ids = [0]
 
         # --- Auto-recovery: check for stale running tasks ---
         from sibyl.experiment_recovery import (
@@ -1206,6 +1209,21 @@ class FarsOrchestrator:
         """Build a single experimenter skill dict."""
         gpu_ids_str = ",".join(str(g) for g in gpu_ids)
         env_cmd = self.config.get_remote_env_cmd(self.ws.name)
+        if self.config.experiment_mode == "local":
+            arg_parts = [
+                ws,
+                mode,
+                "local",   # ssh_server = local → triggers direct Bash execution
+                ".",       # remote_base = current dir
+                env_cmd,
+                "",        # no GPU IDs for CPU-only local execution
+            ]
+            if task_ids:
+                arg_parts.append(f"--tasks={task_ids}")
+            return {
+                "name": "sibyl-experimenter",
+                "args": pack_skill_args(*arg_parts),
+            }
         if self.config.experiment_mode in ("server_codex", "server_claude"):
             arg_parts = [
                 ws,

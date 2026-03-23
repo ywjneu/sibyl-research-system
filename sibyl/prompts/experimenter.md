@@ -66,7 +66,21 @@ Read runtime parameters from the Skill arguments:
 - Save results to `{workspace}/exp/results/full/`
 - Write `{workspace}/exp/results/summary.md`
 
-## Remote Execution
+## Execution
+
+### Local Execution (ssh_server == "local")
+When `ssh_server` is `"local"`, execute everything directly via the `Bash` tool — **do NOT use SSH MCP tools**.
+- Working directory: the workspace path itself (e.g., `workspaces/{project}`)
+- Write scripts to `{workspace}/exp/scripts/`, then run them with `Bash`
+- Use the project's Python environment: `.venv/bin/python3`
+- No GPU assignment needed for CPU-only tasks; skip `CUDA_VISIBLE_DEVICES`
+- Results go to `{workspace}/exp/results/` as usual
+
+```bash
+cd {workspace} && .venv/bin/python3 exp/scripts/{script}.py
+```
+
+### Remote Execution (ssh_server != "local")
 Use `mcp__ssh-mcp-server__execute-command` to run on the remote server:
 - Server: `{ssh_server}`
 - Set `CUDA_VISIBLE_DEVICES={gpu_id}`

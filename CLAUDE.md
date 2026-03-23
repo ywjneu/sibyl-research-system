@@ -179,6 +179,7 @@ Sentinel 是纯 bash 看门狗脚本（`sibyl/sentinel.sh`），跑在 tmux 的 
 | `ssh_mcp` | 通过 SSH MCP 逐条命令交互（默认） |
 | `server_codex` | 在服务器上启动 Codex CLI 本地执行 |
 | `server_claude` | 在服务器上启动 Claude CLI 本地执行 |
+| `local` | 本地直接执行（无 SSH/GPU，适用于 CPU-only 计量经济学等任务） |
 
 ### 模型选择
 - 默认 session 模型: **Sonnet**（最佳性价比）
